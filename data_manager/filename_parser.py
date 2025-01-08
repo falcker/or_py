@@ -1,18 +1,10 @@
-
-
-from dataclasses import dataclass
 from datetime import datetime
+
+from data_manager.datamodel import FileName
 
 filename = "DJI_20241230161023_0001_W_OR-107-96-744b0082fd9b4f7d8edbf8434d67fe5d-[TP6-TP-SE]"
 filename2 = "DJI_20241230161145_0008_W_OR-107-96-f74f6c0c2bd1439b8f9a3e9cf46a4d78-[541-RM1]"
 filename3 = "DJI_20241118204703_0001_W_TP6-TP-SE"
-
-@dataclass
-class FileName:
-    asset: str
-    component: str
-    date_time: datetime
-    guid: str
 
 
 def parse_filename(filename : str):

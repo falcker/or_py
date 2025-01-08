@@ -5,34 +5,8 @@ from pathlib import Path
 import shutil
 from typing import Callable
 
-from filename_parser import FileName
+from datamodel import ImageInfo
 from filename_parser import parse_filename
-
-@dataclass
-class ImageInfo:
-    ID : int
-    filename: FileName
-    file_path : Path
-
-    def __eq__(self, value):
-        eq = False
-        if self.filename.guid and value.filename.guid:
-            eq = self.filename.guid == value.filename.guid
-        eq = self.ID == value.ID
-        eq = self.filename.asset == value.filename.asset
-        eq = self.filename.component == value.filename.component
-        return eq
-
-    def __to_dict__(self):
-        return {'id': self.ID,
-                'filename': self.file_path.name,
-                'filepath': self.file_path,
-                'root_dir_name': self.file_path.parent.name,
-                'asset' : self.filename.asset,
-                'component' : self.filename.component,
-                'guid' : self.filename.guid,
-                'datetime' : self.filename.date_time,
-                }
 
 
 def select_images_over_stream(root : Path) -> None:
