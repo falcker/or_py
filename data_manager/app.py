@@ -5,7 +5,7 @@ from pathlib import Path
 import shutil
 from typing import Callable
 
-from datamodel import ImageInfo
+from datamodel import PhotoInfo
 from filename_parser import parse_filename
 
 
@@ -48,20 +48,20 @@ def dir_to_image_infos(root_dir : Path):
         for image in image_set.iterdir():
             if image.is_file() and image.suffix==".jpeg":
                 file_name = parse_filename(image.name)
-                image_infos.append(ImageInfo(i, file_name,image))
+                image_infos.append(PhotoInfo(i, file_name,image))
                 i+=1
     return image_infos
 
-def sort_image_infos_by_guid(img_infos: list[ImageInfo]):
+def sort_image_infos_by_guid(img_infos: list[PhotoInfo]):
     groups = defaultdict(list)
     for img_info in img_infos:
         groups[img_info.filename.guid].append(img_info)
     return groups
 
-def create_image_info_dir_name(image_info: ImageInfo, skip_id=False):
+def create_image_info_dir_name(image_info: PhotoInfo, skip_id=False):
     return f"{image_info.ID +"_" if not skip_id else ""}{image_info.filename.asset}_{image_info.filename.component}_{image_info.filename.guid}"
         
-def move_by_image_info(image_info : ImageInfo, new_root=None):
+def move_by_image_info(image_info : PhotoInfo, new_root=None):
     if not image_info.filename.guid:
         return
     if not new_root:
@@ -70,7 +70,7 @@ def move_by_image_info(image_info : ImageInfo, new_root=None):
     move_image(image_info.file_path,new_root)
 
 
-def move_by_image_infos(image_infos: list[ImageInfo]):
+def move_by_image_infos(image_infos: list[PhotoInfo]):
     for image_info in image_infos:
         move_by_image_info(image_info)
 
