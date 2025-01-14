@@ -2,11 +2,13 @@ from datetime import datetime
 from pathlib import Path
 import pytest
 
+from data_manager.data_manager import collection_round_to_streams
 from data_manager.datamodel import (
     CollectionRound,
     CollectionRounds,
     FileName,
     PhotoInfo,
+    PhotoStream,
 )
 
 collection_round_id = 1
@@ -80,3 +82,13 @@ def test_collection_rounds_from_dir():
     cr = CollectionRound.from_dir(collection_round_root, 1)
     assert cr in crs
     assert collection_round_name == crs[0].name
+
+
+@pytest.fixture
+def collection_rounds():
+    return CollectionRounds.from_dir(root_dir=collection_rounds_root)
+
+
+def test_collection_round_to_streams(collection_rounds):
+    photostreams = collection_round_to_streams(collection_rounds)
+    assert len(photostreams) == 95

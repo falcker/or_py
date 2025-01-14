@@ -80,22 +80,39 @@ class PhotoStream:
     asset: str
     dir_path: Path = None
 
+    # @classmethod
+    # def from_dir(cls, root_dir: Path, photostream_id: int) -> PhotoStream:
+    #     images = []
+    #     # parse_photostream(root_dir.name)
+    #     for item in root_dir.iterdir():
+    #         if not item.is_file or not item.suffix == ".jpeg":
+    #             continue
+    #         images.append(
+    #             PhotoInfo(photostream_id, FileName.from_filename(item.name), item)
+    #         )
+
+    #     return PhotoStream(
+    #         photostream_id=photostream_id,
+    #         stream=images,
+    #         asset=
+    #         )
+
 
 @dataclass
 class CollectionRound:
     collection_round_id: int
     name: str
-    __series: list[PhotoInfo]
     tags: list[Tag]
     date_time: datetime
     asset: str
     dir_path: Path
+    _series: list[PhotoInfo]
 
     def __iter__(self):
-        return iter(self.__series)
+        return iter(self._series)
 
     def __getitem__(self, item):
-        return self.__series[item]
+        return self._series[item]
 
     def save_collection_round(self, output_file_path: Path = None):
         if not output_file_path:
@@ -128,10 +145,10 @@ class CollectionRound:
             photo_infos.append(
                 PhotoInfo(idx, FileName.from_filename(photo.name), photo)
             )
-        return CollectionRound(
+        return cls(
             collection_round_id=collection_round_id,
             name=name,
-            series=photo_infos,
+            _series=photo_infos,
             tags=tags,
             date_time=date,
             asset=asset_name,

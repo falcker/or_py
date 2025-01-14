@@ -2,7 +2,7 @@ from collections import defaultdict
 from pathlib import Path
 import json
 
-from datamodel import CollectionRounds
+from data_manager.datamodel import CollectionRounds, PhotoStream
 
 # TODO
 # 1 read PhotoStream metadata (json)
@@ -18,13 +18,28 @@ and what the weather/lighting condition were at the time of taking the image.
 
 # collection = CollectionRounds()
 
+# def collection_round_()
 
-def sort_collection_rounds_by_streams(collection_rounds: CollectionRounds):
+
+def collection_round_to_streams(
+    collection_rounds: CollectionRounds,
+) -> list[PhotoStream]:
+    photo_info_groups = defaultdict(list)
+    photo_streams = []
     for collection_round in collection_rounds:
-        collection_round
-    #     groups = defaultdict(list)
+        for photo_info in collection_round:
+            photo_info_groups[photo_info.photostream_id].append(photo_info)
+        photo_streams.append(
+            PhotoStream(
+                photo_info.photostream_id,
+                photo_info_groups[photo_info.photostream_id],
+                collection_round_tags=collection_round.tags,
+                asset=collection_round.asset,
+            )
+        )
+    return photo_streams
+    # photo_info_groups[photo_info.photostream_id]
     # for img_info in img_infos:
-    #     groups[img_info.filename.guid].append(img_info)
     # return groups
 
 
