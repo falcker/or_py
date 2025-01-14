@@ -5,10 +5,17 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "napari>=0.5.5",
+    "pyvips>=2.2.3",
     "ruff>=0.8.6",
+    "tifffile>=2024.12.12",
 ]
 
 [dependency-groups]
 dev = [
     "ipykernel>=6.29.5",
 ]
+
+# [build-system]
+# requires = ["hatchling"]
+# build-backend = "hatchling.build"
