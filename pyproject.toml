@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "napari>=0.5.5",
+    "pytest>=8.3.4",
     "pyvips>=2.2.3",
     "ruff>=0.8.6",
     "tifffile>=2024.12.12",
