@@ -5,7 +5,10 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "opencv-python>=4.11.0.86",
+    "rastervision>=0.31.1",
     "ruff>=0.8.6",
+    "scikit-learn>=1.6.1",
 ]
 
 [dependency-groups]
