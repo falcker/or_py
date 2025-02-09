@@ -1,37 +1,19 @@
 # import the necessary packages
 from imutils import paths
 import numpy as np
-import argparse
 import imutils
 import cv2
 
-# # construct the argument parser and parse the arguments
-# ap = argparse.ArgumentParser()
-# ap.add_argument(
-#     "-i",
-#     "--images",
-#     type=str,
-#     required=True,
-#     help="path to input directory of images to stitch",
-# )
-# ap.add_argument(
-#     "-o", "--output", type=str, required=True, help="path to the output image"
-# )
-# ap.add_argument(
-#     "-c",
-#     "--crop",
-#     type=int,
-#     default=0,
-#     help="whether to crop out largest rectangular region",
-# )
-# args = vars(ap.parse_args())
-# grab the paths to the input images and initialize our images list
 crop = 1
-output = r"C:\Users\Gebruiker\Documents\GitHub\or_py\data\output\stitched.jpg"
+output = (
+    r"C:\Users\Gebruiker\Documents\GitHub\or_py\data\output\cv2_stitch\stitched.jpg"
+)
 print("[INFO] loading images...")
 # imagePaths = sorted(list(paths.list_images(args["images"])))
 imagePaths = sorted(
-    list(paths.list_images(r"C:\Users\Gebruiker\Documents\GitHub\or_py\data\input"))
+    list(paths.list_images(r"C:\Users\Gebruiker\Documents\GitHub\or_py\data\input"))[
+        0:2
+    ]
 )
 images = []
 # loop over the image paths, load each one, and add them to our
