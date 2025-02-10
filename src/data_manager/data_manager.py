@@ -21,6 +21,14 @@ and what the weather/lighting condition were at the time of taking the image.
 # def collection_round_()
 
 
+def get_photo_stream_root_dir() -> Path:
+    return Path(r"C:\Users\Gebruiker\Documents\GitHub\or_py\data\input")
+
+
+def get_photo_stream_paths() -> list[Path]:
+    return list(get_photo_stream_root_dir().iterdir())
+
+
 def collection_round_to_streams(
     collection_rounds: CollectionRounds,
 ) -> list[PhotoStream]:
