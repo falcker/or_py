@@ -84,7 +84,7 @@ finder = FeatureDetector()
 features = [finder.detect_features(img) for img in medium_imgs]
 keypoints_center_img = finder.draw_keypoints(medium_imgs[1], features[1])
 
-plot_image(keypoints_center_img, (15, 10))
+# plot_image(keypoints_center_img, (15, 10))
 
 """ 
 Match Features
@@ -108,7 +108,7 @@ The inliers are calculated using the random sample consensus (RANSAC) method, e.
 conf_matrix = matcher.get_confidence_matrix(matches)
 plt.imshow(conf_matrix)
 df_cm = pd.DataFrame(
-    conf_matrix, index=[i for i in "ABCDEFGHIJKL"], columns=[i for i in "ABCDEFGHIJKL"]
+    conf_matrix, index=[i for i in "ABCDEFGHIJK"], columns=[i for i in "ABCDEFGHIJK"]
 )
 sn.heatmap(df_cm, annot=True)
 
@@ -120,9 +120,9 @@ all_relevant_matches = matcher.draw_matches_matrix(
     medium_imgs, features, matches, conf_thresh=1, inliers=True, matchColor=(0, 255, 0)
 )
 
-for idx1, idx2, img in all_relevant_matches:
-    print(f"Matches Image {idx1+1} to Image {idx2+1}")
-    plot_image(img, (20, 10))
+# for idx1, idx2, img in all_relevant_matches:
+#     print(f"Matches Image {idx1+1} to Image {idx2+1}")
+#     plot_image(img, (20, 10))
 
 """ 
 Subset
@@ -201,8 +201,8 @@ warped_final_masks = list(
 )
 final_corners, final_sizes = warper.warp_rois(final_sizes, cameras, camera_aspect)
 # We can plot the results. Not much scaling and rotating is needed to align the images. Thus, the images are only slightly adjusted in this example
-plot_images(warped_low_imgs, (10, 10))
-plot_images(warped_low_masks, (10, 10))
+# plot_images(warped_low_imgs, (10, 10))
+# plot_images(warped_low_masks, (10, 10))
 print(final_corners)
 print(final_sizes)
 """ 
@@ -222,7 +222,7 @@ timelapser.initialize(final_corners, final_sizes)
 for img, corner in zip(warped_final_imgs, final_corners):
     timelapser.process_frame(img, corner)
     frame = timelapser.get_frame()
-    plot_image(frame, (10, 10))
+    # plot_image(frame, (10, 10))
 """ 
 Crop
 
@@ -237,7 +237,7 @@ cropper = Cropper()
 mask = cropper.estimate_panorama_mask(
     warped_low_imgs, warped_low_masks, low_corners, low_sizes
 )
-plot_image(mask, (5, 5))
+# plot_image(mask, (5, 5))
 
 # he estimation of the largest interior rectangle is not yet implemented in OpenCV, but a Numba Implementation by my own. You check out the details here. Compiling the Code takes a bit (only once, the compiled code is then cached for future function calls)
 lir = cropper.estimate_largest_interior_rectangle(mask)
@@ -245,23 +245,23 @@ lir = cropper.estimate_largest_interior_rectangle(mask)
 lir = cropper.estimate_largest_interior_rectangle(mask)
 print(lir)
 plot = lir.draw_on(mask, size=2)
-plot_image(plot, (5, 5))
+# plot_image(plot, (5, 5))
 """ By zero centering the the warped corners, the rectangle of the images within the final plane can be determined. Here the center image is shown: """
 low_corners = cropper.get_zero_center_corners(low_corners)
 rectangles = cropper.get_rectangles(low_corners, low_sizes)
 
 plot = rectangles[1].draw_on(plot, (0, 255, 0), 2)  # The rectangle of the center img
-plot_image(plot, (5, 5))
+# plot_image(plot, (5, 5))
 
 # Using the overlap new corners and sizes can be determined:
 overlap = cropper.get_overlap(rectangles[1], lir)
 plot = overlap.draw_on(plot, (255, 0, 0), 2)
-plot_image(plot, (5, 5))
+# plot_image(plot, (5, 5))
 
 # With the blue Rectangle in the coordinate system of the original image (green) we are able to crop it
 intersection = cropper.get_intersection(rectangles[1], overlap)
 plot = intersection.draw_on(warped_low_masks[1], (255, 0, 0), 2)
-plot_image(plot, (2.5, 2.5))
+# plot_image(plot, (2.5, 2.5))
 
 # Using all this information we can crop the images and masks and obtain new coreners and sizes
 cropper.prepare(warped_low_imgs, warped_low_masks, low_corners, low_sizes)
