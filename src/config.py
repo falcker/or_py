@@ -1,3 +1,3 @@
 from pathlib import Path
 
-PACKAGE_ROOT = Path(r"C:\Users\Milo\Documents\Falcker\AI\or_py")
+PACKAGE_ROOT = Path(r"C:\Users\Gebruiker\Documents\GitHub\or_py")
