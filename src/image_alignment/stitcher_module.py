@@ -48,10 +48,17 @@ class ImagesContainer:
     """Container holds images in different resolutions."""
 
     original: Images
-    medium: list[np.ndarray]
-    low: list[np.ndarray]
-    final: list[np.ndarray]
+    medium_quality: list[np.ndarray]
+    low_quality: list[np.ndarray]
+    final_quality: list[np.ndarray]
     sizes: ImageSetSizes
+
+
+# @dataclass
+# class StitchingContainer:
+#     features: cv.typing.ImageFeatures
+#     matcher:
+#     matches:
 
 
 # With the following block, we allow displaying resulting images within the notebook:
@@ -127,7 +134,7 @@ def images_prepare_resolutions(image_paths: list[str]) -> ImagesContainer:
     )
 
 
-images_set = images_prepare_resolutions(image_paths)
+images_container = images_prepare_resolutions(image_paths)
 
 
 def feature_finder(
@@ -148,7 +155,7 @@ def feature_finder(
     return features
 
 
-features = feature_finder(images_set.medium)
+features = feature_finder(images_container.medium_quality)
 
 
 def feature_matcher(
@@ -205,24 +212,26 @@ def feature_matcher(
     return matches
 
 
-matches = feature_matcher(images_set.medium, features)
+matches = feature_matcher(images_container.medium_quality, features)
 
 
 def subset(
-    images_set: ImagesContainer,
+    images_container: ImagesContainer,
     matches: list[cv.DMatch],
     features: list[cv.KeyPoint],
 ) -> list[np.ndarray]:
     """
     Subset
 
-    Above we saw that the noise image has no connection to the other images which are part of the panorama. We now want to create a subset with only the relevant images. The class which can be used is the Subsetter class. We can specify the confidence_threshold from when a match is regarded as good match. We saw that in our case 1 is sufficient. For the parameter matches_graph_dot_file a file name can be passed, in which a matches graph in dot notation is saved.
+    Above we saw that the noise image has no connection to the other images which are part of the panorama. We now want to create a subset with only the relevant images.
+    The class which can be used is the Subsetter class. We can specify the confidence_threshold from when a match is regarded as good match.
+    We saw that in our case 1 is sufficient. For the parameter matches_graph_dot_file a file name can be passed, in which a matches graph in dot notation is saved.
 
     Subsetter(confidence_threshold=1, matches_graph_dot_file=None)
     """
 
     subsetter = Subsetter()
-    dot_notation = subsetter.get_matches_graph(imgs.names, matches)
+    dot_notation = subsetter.get_matches_graph(images_container.images.names, matches)
     print(dot_notation)
 
     """ 
@@ -230,16 +239,23 @@ def subset(
     """
     indices = subsetter.get_indices_to_keep(features, matches)
 
-    medium_imgs = subsetter.subset_list(medium_imgs, indices)
-    low_imgs = subsetter.subset_list(low_imgs, indices)
-    final_imgs = subsetter.subset_list(final_imgs, indices)
+    images_container.medium_quality = subsetter.subset_list(
+        images_container.medium_quality, indices
+    )
+    images_container.low_quality = subsetter.subset_list(
+        images_container.low_quality, indices
+    )
+    images_container.final_quality = subsetter.subset_list(
+        images_container.final_quality, indices
+    )
     features = subsetter.subset_list(features, indices)
     matches = subsetter.subset_matches(matches, indices)
 
-    images.subset(indices)
+    images_container.images.subset(indices)
 
-    print(images.names)
-    print(matcher.get_confidence_matrix(matches))
+    print(images_container.images.names)
+    print(images_container.matcher.get_confidence_matrix(matches))
+    return images_container
 
 
 def camera_corrector(

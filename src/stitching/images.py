@@ -2,7 +2,7 @@ import os
 from abc import ABC, abstractmethod
 from enum import Enum
 from glob import glob
-from typing import Self
+from typing import Iterator, Self
 
 import cv2 as cv
 import numpy as np
@@ -72,7 +72,7 @@ class Images(ABC):
         self._sizes = [self._sizes[i] for i in indices]
         self._names = [self._names[i] for i in indices]
 
-    def resize(self, resolution, imgs=None):
+    def resize(self, resolution, imgs=None) -> Iterator[cv.typing.MatLike]:
         img_iterable = self.__iter__() if imgs is None else imgs
         for idx, img in enumerate(img_iterable):
             yield Images.resize_img_by_scaler(
@@ -122,7 +122,7 @@ class Images(ABC):
         return (img.shape[1], img.shape[0])
 
     @staticmethod
-    def resize_img_by_scaler(scaler, size, img):
+    def resize_img_by_scaler(scaler, size, img) -> cv.typing.MatLike:
         desired_size = scaler.get_scaled_img_size(size)
         return cv.resize(img, desired_size, interpolation=cv.INTER_LINEAR_EXACT)
 
