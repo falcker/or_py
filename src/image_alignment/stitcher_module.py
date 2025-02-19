@@ -32,51 +32,26 @@ from stitching.cropper import Cropper
 
 
 @dataclass
-class ImageSet:
-    """
-    A class to represent a set of images for stitching.
+class ImageSetSizes:
+    original: tuple[int, int]
+    medium: tuple[int, int]
+    small: tuple[int, int]
+    final: tuple[int, int]
 
-    Attributes:
-    images (list[Images]): A list of Images objects representing the images in the set.
-    names (list[str]): A list of strings representing the names of the images in the set.
-    sizes (list[tuple[int, int]]): A list of tuples representing the sizes of the images in the set.
-    names_set (bool): A boolean indicating whether the names of the images have been set.
 
-    Methods:
-    subset(indices): Subsets the images and names based on the provided indices.
-    resize(resolution): Resizes the images to the specified resolution.
-    """
+# @dataclass
+# class Images:
 
-    images: list[Images] = field(default_factory=list)
-    names: list[str] = field(default_factory=list)
-    sizes: list[tuple[int, int]] = field(default_factory=list)
-    names_set: bool = False
 
-    def subset(self, indices):
-        self.images = [self.images[i] for i in indices]
-        self.names = [self.names[i] for i in indices]
-        self.sizes = [self.sizes[i] for i in indices]
+@dataclass
+class ImagesContainer:
+    """Container holds images in different resolutions."""
 
-        self.names_set = True
-
-    def resize(self, resolution):
-        new_images = []
-        for img in self.images:
-            new_img = cv.resize(img, resolution)
-            new_images.append(new_img)
-        self.images = new_images
-        self.sizes = [(h, w) for h, w in zip(*[img.shape[:2] for img in self.images])]
-        self.names_set = True
-
-    def __iter__(self):
-        for img in self.images:
-            yield img
-
-    def get_image_size(img):
-        return img.shape[:2]
-
-    def get_image_path(self, name):
-        return Path("imgs") / Path(name)
+    original: Images
+    medium: list[np.ndarray]
+    low: list[np.ndarray]
+    final: list[np.ndarray]
+    sizes: ImageSetSizes
 
 
 # With the following block, we allow displaying resulting images within the notebook:
@@ -98,10 +73,10 @@ def get_image_paths(img_set):
     return [str(path.relative_to(".")) for path in Path("imgs").rglob(f"{img_set}*")]
 
 
-weir_imgs = [str(x) for x in get_photo_stream_paths()]
+image_paths = [str(x) for x in get_photo_stream_paths()]
 
 
-def images_prepare_resolutions(image_paths: list[str]) -> list[Images]:
+def images_prepare_resolutions(image_paths: list[str]) -> ImagesContainer:
     """
     Prepare and resize images for different resolutions.
 
@@ -131,7 +106,7 @@ def images_prepare_resolutions(image_paths: list[str]) -> list[Images]:
     final_size = images.get_image_size(final_imgs[0])
 
     print(
-        f"Original Size: {original_size}  -> {'{:,}'.format(np.prod(original_size))} px ~ 1 MP"
+        f"Original Size: {original_size}  -> {'{:,}'.format(np.prod(original_size))} px ~ 12 MP"
     )
     print(
         f"Medium Size:   {medium_size}  -> {'{:,}'.format(np.prod(medium_size))} px ~ 0.6 MP"
@@ -142,18 +117,22 @@ def images_prepare_resolutions(image_paths: list[str]) -> list[Images]:
     print(
         f"Final Size:    {final_size}  -> {'{:,}'.format(np.prod(final_size))} px ~ 1 MP"
     )
-    return (
-        original_size,
-        low_size,
-        medium_size,
-        final_size,
+    image_set_sizes = ImageSetSizes(original_size, medium_size, low_size, final_size)
+    return ImagesContainer(
+        images,
         medium_imgs,
         low_imgs,
         final_imgs,
+        image_set_sizes,
     )
 
 
-def feature_finder(imgs: list[np.ndarray]) -> list[cv.KeyPoint]:
+images_set = images_prepare_resolutions(image_paths)
+
+
+def feature_finder(
+    imgs: list[np.ndarray], draw_keypoints_center=False
+) -> list[cv.KeyPoint]:
     """
     Find Features
 
@@ -163,13 +142,17 @@ def feature_finder(imgs: list[np.ndarray]) -> list[cv.KeyPoint]:
     """
     finder = FeatureDetector()
     features = [finder.detect_features(img) for img in imgs]
-    keypoints_center_img = finder.draw_keypoints(imgs[1], features[1])
-    return keypoints_center_img
+    if draw_keypoints_center:
+        keypoints_center_img = finder.draw_keypoints(imgs[1], features[1])
+        plot_image(keypoints_center_img, (15, 10))
+    return features
 
 
-# plot_image(keypoints_center_img, (15, 10))
+features = feature_finder(images_set.medium)
+
+
 def feature_matcher(
-    imgs: list[np.ndarray], features: list[cv.KeyPoint], matches: list[cv.DMatch]
+    imgs: list[np.ndarray], features: list[cv.KeyPoint], print_relevant_matches=False
 ) -> np.ndarray:
     """
     Match Features
@@ -189,6 +172,10 @@ def feature_matcher(
 
     The inliers are calculated using the random sample consensus (RANSAC) method, e.g. in this file in Line 425. We can plot the inliers which is shown later.
     """
+    if not print_relevant_matches:
+        return matches
+
+    #### runs below only if print_relevant_matches is True
 
     conf_matrix = matcher.get_confidence_matrix(matches)
     plt.imshow(conf_matrix)
@@ -212,14 +199,17 @@ def feature_matcher(
         matchColor=(0, 255, 0),
     )
 
-    # for idx1, idx2, img in all_relevant_matches:
-    #     print(f"Matches Image {idx1+1} to Image {idx2+1}")
-    #     plot_image(img, (20, 10))
-    return all_relevant_matches
+    for idx1, idx2, img in all_relevant_matches:
+        print(f"Matches Image {idx1+1} to Image {idx2+1}")
+        plot_image(img, (20, 10))
+    return matches
+
+
+matches = feature_matcher(images_set.medium, features)
 
 
 def subset(
-    imgs: list[np.ndarray],
+    images_set: ImagesContainer,
     matches: list[cv.DMatch],
     features: list[cv.KeyPoint],
 ) -> list[np.ndarray]:

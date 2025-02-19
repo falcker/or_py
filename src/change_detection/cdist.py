@@ -2,10 +2,12 @@
 https://stackoverflow.com/questions/56183201/detect-and-visualize-differences-between-two-images-with-opencv-python
 """
 
+import matplotlib.pyplot as plt
 from skimage.metrics import structural_similarity
 import cv2
 import numpy as np
 from PIL import Image
+import scipy.spatial.distance as SSD
 
 from config import PACKAGE_ROOT
 
@@ -20,6 +22,20 @@ after = cv2.imread(
 # Convert images to grayscale
 before_gray = cv2.cvtColor(before, cv2.COLOR_BGR2GRAY)
 after_gray = cv2.cvtColor(after, cv2.COLOR_BGR2GRAY)
+
+
+def using_cdist_2im(A, B):
+    M = np.array([A.mean(), B.mean()])
+    cov = np.cov([A.ravel(), B.ravel()])
+    inv_cov = np.linalg.inv(cov)
+    D = np.dstack([A, B]).reshape(-1, 2)
+    result = SSD.cdist(D, M[None, :], metric="mahalanobis", VI=inv_cov)
+    result = result.reshape(A.shape)
+    return result
+
+
+difference = using_cdist_2im(before_gray, after_gray)
+plt.imshow(difference, cmap="gray")
 
 # Compute SSIM between the two images
 (score, diff) = structural_similarity(before_gray, after_gray, full=True)

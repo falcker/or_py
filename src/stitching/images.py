@@ -2,6 +2,7 @@ import os
 from abc import ABC, abstractmethod
 from enum import Enum
 from glob import glob
+from typing import Self
 
 import cv2 as cv
 import numpy as np
@@ -18,11 +19,11 @@ class Images(ABC):
 
     @staticmethod
     def of(
-        images,
+        images: np.ndarray | str,
         medium_megapix=Resolution.MEDIUM.value,
         low_megapix=Resolution.LOW.value,
         final_megapix=Resolution.FINAL.value,
-    ):
+    ) -> Self:
         if not isinstance(images, list):
             raise StitchingError("images must be a list of images or filenames")
         if len(images) == 0:
@@ -109,7 +110,7 @@ class Images(ABC):
         ]
 
     @staticmethod
-    def read_image(img_name):
+    def read_image(img_name) -> cv.typing.MatLike:
         img = cv.imread(img_name)
         if img is None:
             raise StitchingError("Cannot read image " + img_name)
