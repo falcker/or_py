@@ -8,15 +8,15 @@ from pathlib import Path
 
 import pandas as pd
 from config import PACKAGE_ROOT
+from stitching import stitcher
 from stitching.images import Images
+from stitching.feature_matcher import FeatureMatcher
 
 from PIL import Image
 
-from data_manager.data_manager import get_photo_stream_paths
 
 from stitching.feature_detector import FeatureDetector
 
-from stitching.feature_matcher import FeatureMatcher
 
 from stitching.subsetter import Subsetter
 
@@ -47,18 +47,17 @@ class ImageSetSizes:
 class ImagesContainer:
     """Container holds images in different resolutions."""
 
-    original: Images
-    medium_quality: list[np.ndarray]
-    low_quality: list[np.ndarray]
-    final_quality: list[np.ndarray]
+    original_images: Images
+    medium_quality_images: list[np.ndarray]
+    low_quality_images: list[np.ndarray]
+    final_quality_images: list[np.ndarray]
     sizes: ImageSetSizes
 
 
-# @dataclass
-# class StitchingContainer:
-#     features: cv.typing.ImageFeatures
-#     matcher:
-#     matches:
+@dataclass
+class StitchingContainer:
+    features: cv.detail.ImageFeatures = field(default_factory=list)
+    matches: cv.detail.MatchesInfo = field(default_factory=list)
 
 
 # With the following block, we allow displaying resulting images within the notebook:
@@ -78,9 +77,6 @@ def plot_images(imgs, figsize_in_inches=(5, 5)):
 # With the following block, we load the correct img paths to the used image sets:
 def get_image_paths(img_set):
     return [str(path.relative_to(".")) for path in Path("imgs").rglob(f"{img_set}*")]
-
-
-image_paths = [str(x) for x in get_photo_stream_paths()]
 
 
 def images_prepare_resolutions(image_paths: list[str]) -> ImagesContainer:
@@ -134,9 +130,6 @@ def images_prepare_resolutions(image_paths: list[str]) -> ImagesContainer:
     )
 
 
-images_container = images_prepare_resolutions(image_paths)
-
-
 def feature_finder(
     imgs: list[np.ndarray], draw_keypoints_center=False
 ) -> list[cv.KeyPoint]:
@@ -155,11 +148,11 @@ def feature_finder(
     return features
 
 
-features = feature_finder(images_container.medium_quality)
-
-
 def feature_matcher(
-    imgs: list[np.ndarray], features: list[cv.KeyPoint], print_relevant_matches=False
+    imgs: list[np.ndarray],
+    features: list[cv.KeyPoint],
+    matcher: FeatureMatcher,
+    print_relevant_matches=False,
 ) -> np.ndarray:
     """
     Match Features
@@ -168,8 +161,6 @@ def feature_matcher(
 
     FeatureMatcher(matcher_type='homography', range_width=-1)
     """
-
-    matcher = FeatureMatcher()
     matches = matcher.match_features(features)
 
     """ 
@@ -212,14 +203,12 @@ def feature_matcher(
     return matches
 
 
-matches = feature_matcher(images_container.medium_quality, features)
-
-
 def subset(
     images_container: ImagesContainer,
+    matcher: FeatureMatcher,
     matches: list[cv.DMatch],
     features: list[cv.KeyPoint],
-) -> list[np.ndarray]:
+) -> ImagesContainer:
     """
     Subset
 
@@ -231,7 +220,9 @@ def subset(
     """
 
     subsetter = Subsetter()
-    dot_notation = subsetter.get_matches_graph(images_container.images.names, matches)
+    dot_notation = subsetter.get_matches_graph(
+        images_container.original_images.names, matches
+    )
     print(dot_notation)
 
     """ 
@@ -239,22 +230,22 @@ def subset(
     """
     indices = subsetter.get_indices_to_keep(features, matches)
 
-    images_container.medium_quality = subsetter.subset_list(
-        images_container.medium_quality, indices
+    images_container.medium_quality_images = subsetter.subset_list(
+        images_container.medium_quality_images, indices
     )
-    images_container.low_quality = subsetter.subset_list(
-        images_container.low_quality, indices
+    images_container.low_quality_images = subsetter.subset_list(
+        images_container.low_quality_images, indices
     )
-    images_container.final_quality = subsetter.subset_list(
-        images_container.final_quality, indices
+    images_container.final_quality_images = subsetter.subset_list(
+        images_container.final_quality_images, indices
     )
     features = subsetter.subset_list(features, indices)
     matches = subsetter.subset_matches(matches, indices)
 
-    images_container.images.subset(indices)
+    images_container.original_images.subset(indices)
 
-    print(images_container.images.names)
-    print(images_container.matcher.get_confidence_matrix(matches))
+    print(images_container.original_images.names)
+    print(matcher.get_confidence_matrix(matches))
     return images_container
 
 
@@ -278,9 +269,10 @@ def camera_corrector(
     cameras = camera_estimator.estimate(features, matches)
     cameras = camera_adjuster.adjust(features, matches, cameras)
     cameras = wave_corrector.correct(cameras)
+    return cameras
 
 
-def warp_images(images: Images, cameras: list[Camera]) -> None:
+def warp_images(images_container: ImagesContainer, cameras) -> None:
     """
     Warp Images
 
@@ -293,21 +285,33 @@ def warp_images(images: Images, cameras: list[Camera]) -> None:
     # At first, we set the the medium focal length of the cameras as scale:
     warper.set_scale(cameras)
     # Warp low resolution images
-    low_sizes = images.get_scaled_img_sizes(Images.Resolution.LOW)
-    camera_aspect = images.get_ratio(
+    low_sizes = images_container.original_images.get_scaled_img_sizes(
+        Images.Resolution.LOW
+    )
+    camera_aspect = images_container.original_images.get_ratio(
         Images.Resolution.MEDIUM, Images.Resolution.LOW
     )  # since cameras were obtained on medium imgs
 
-    warped_low_imgs = list(warper.warp_images(low_imgs, cameras, camera_aspect))
+    warped_low_imgs = list(
+        warper.warp_images(images_container.low_quality_images, cameras, camera_aspect)
+    )
     warped_low_masks = list(
         warper.create_and_warp_masks(low_sizes, cameras, camera_aspect)
     )
     low_corners, low_sizes = warper.warp_rois(low_sizes, cameras, camera_aspect)
     # Warp final resolution images
-    final_sizes = images.get_scaled_img_sizes(Images.Resolution.FINAL)
-    camera_aspect = images.get_ratio(Images.Resolution.MEDIUM, Images.Resolution.FINAL)
+    final_sizes = images_container.original_images.get_scaled_img_sizes(
+        Images.Resolution.FINAL
+    )
+    camera_aspect = images_container.original_images.get_ratio(
+        Images.Resolution.MEDIUM, Images.Resolution.FINAL
+    )
 
-    warped_final_imgs = list(warper.warp_images(final_imgs, cameras, camera_aspect))
+    warped_final_imgs = list(
+        warper.warp_images(
+            images_container.final_quality_images, cameras, camera_aspect
+        )
+    )
     warped_final_masks = list(
         warper.create_and_warp_masks(final_sizes, cameras, camera_aspect)
     )
@@ -317,7 +321,23 @@ def warp_images(images: Images, cameras: list[Camera]) -> None:
     # plot_images(warped_low_masks, (10, 10))
     print(final_corners)
     print(final_sizes)
-    """ 
+    return {
+        "warped_low_images": warped_low_imgs,
+        "warped_low_masks": warped_low_masks,
+        "warped_final_images": warped_final_imgs,
+        "warped_final_masks": warped_final_masks,
+        "final_corners": final_corners,
+        "final_sizes": final_sizes,
+    }
+
+
+def process_timelapse(
+    warped_final_imgs: list[np.ndarray],
+    final_corners: list[np.ndarray],
+    final_sizes: list[tuple[int, int]],
+    timelapser: Timelapser | None = None,
+):
+    """
     Excursion: Timelapser
 
     The Timelapser functionality is a nice way to grasp how the images are warped into a final plane. The class which can be used is the Timelapser class:
@@ -327,23 +347,41 @@ def warp_images(images: Images, cameras: list[Camera]) -> None:
     THIS IS THE OUTPUT!?!?!?!??!!?!?
 
     """
-
-    timelapser = Timelapser("as_is")
+    if not timelapser:
+        timelapser = Timelapser("as_is")
     timelapser.initialize(final_corners, final_sizes)
 
     for img, corner in zip(warped_final_imgs, final_corners):
         timelapser.process_frame(img, corner)
         frame = timelapser.get_frame()
-        # plot_image(frame, (10, 10))
-    """ 
+        plot_image(frame, (10, 10))
+    return timelapser
+
+
+def crop(
+    images_container: ImagesContainer,
+    warped_low_imgs: list[np.ndarray],
+    warped_low_masks: list[np.ndarray],
+    low_corners: list[np.ndarray],
+    low_sizes: list[tuple[int, int]],
+    warped_final_imgs: list[np.ndarray],
+    warped_final_masks: list[np.ndarray],
+    final_corners: list[np.ndarray],
+    final_sizes: list[tuple[int, int]],
+    cropper: Cropper | None = None,
+) -> list[np.ndarray]:
+    """
     Crop
 
-    We can see that none of the images have the full height of the final plane. To get a panorama without black borders we can now estimate the largest joint interior rectangle and crop the single images accordingly. The class which can be used is the Cropper class:
+    We can see that none of the images have the full height of the final plane.
+    To get a panorama without black borders we can now estimate
+    the largest joint interior rectangle and crop the single images accordingly.
+    The class which can be used is the Cropper class:
 
     Cropper(crop=True)
     """
-
-    cropper = Cropper()
+    if not cropper:
+        cropper = Cropper()
 
     # We can estimate a panorama mask of the potential final panorama (using a Blender which will be introduced later)
     mask = cropper.estimate_panorama_mask(
@@ -351,14 +389,22 @@ def warp_images(images: Images, cameras: list[Camera]) -> None:
     )
     # plot_image(mask, (5, 5))
 
-    # he estimation of the largest interior rectangle is not yet implemented in OpenCV, but a Numba Implementation by my own. You check out the details here. Compiling the Code takes a bit (only once, the compiled code is then cached for future function calls)
+    # The estimation of the largest interior rectangle is
+    # not yet implemented in OpenCV, but a Numba Implementation
+    # by my own. You check out the details here.
+    # Compiling the Code takes a bit (only once, the compiled code
+    # is then cached for future function calls)
     lir = cropper.estimate_largest_interior_rectangle(mask)
-    # After compilation the estimation is really fast:
-    lir = cropper.estimate_largest_interior_rectangle(mask)
+    # # After compilation the estimation is really fast:
+    # lir = cropper.estimate_largest_interior_rectangle(mask)
     print(lir)
     plot = lir.draw_on(mask, size=2)
     # plot_image(plot, (5, 5))
-    """ By zero centering the the warped corners, the rectangle of the images within the final plane can be determined. Here the center image is shown: """
+
+    # def center_image(cropper, mask):
+    """ By zero centering the the warped corners, the rectangle of the 
+    images within the final plane can be determined. Here the 
+    center image is shown: """
     low_corners = cropper.get_zero_center_corners(low_corners)
     rectangles = cropper.get_rectangles(low_corners, low_sizes)
 
@@ -384,7 +430,7 @@ def warp_images(images: Images, cameras: list[Camera]) -> None:
     cropped_low_imgs = list(cropper.crop_images(warped_low_imgs))
     low_corners, low_sizes = cropper.crop_rois(low_corners, low_sizes)
 
-    lir_aspect = images.get_ratio(
+    lir_aspect = images_container.orignal.get_ratio(
         Images.Resolution.LOW, Images.Resolution.FINAL
     )  # since lir was obtained on low imgs
     cropped_final_masks = list(cropper.crop_images(warped_final_masks, lir_aspect))
@@ -398,15 +444,21 @@ def warp_images(images: Images, cameras: list[Camera]) -> None:
     timelapser.initialize(final_corners, final_sizes)
 
 
-# export images
-output_dir = PACKAGE_ROOT / "data/output/stitched2"
-for idx, (img, corner) in enumerate(zip(cropped_final_imgs, final_corners)):
-    timelapser.process_frame(img, corner)
-    frame = timelapser.get_frame()
-    # print(frame, type(frame))
-    im = Image.fromarray(cv.cvtColor(frame, cv.COLOR_BGR2RGB))
-    im.save(output_dir / f"{idx+1}.jpg")
-    # plot_image(frame, (10, 10)) (for timelapse)
+def export_images(
+    cropped_final_imgs,
+    final_corners,
+    timelapser: Timelapser,
+    output_dir=PACKAGE_ROOT / "data/output/stitched2",
+) -> None:
+    # export images
+
+    for idx, (img, corner) in enumerate(zip(cropped_final_imgs, final_corners)):
+        timelapser.process_frame(img, corner)
+        frame = timelapser.get_frame()
+        # print(frame, type(frame))
+        im = Image.fromarray(cv.cvtColor(frame, cv.COLOR_BGR2RGB))
+        im.save(output_dir / f"{idx+1}.jpg")
+        # plot_image(frame, (10, 10)) (for timelapse)
 
 
 # https://github.com/OpenStitching/stitching_tutorial/blob/master/Stitching%20Tutorial.ipynb
