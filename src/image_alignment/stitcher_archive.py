@@ -240,7 +240,10 @@ mask = cropper.estimate_panorama_mask(
 )
 # plot_image(mask, (5, 5))
 
-# he estimation of the largest interior rectangle is not yet implemented in OpenCV, but a Numba Implementation by my own. You check out the details here. Compiling the Code takes a bit (only once, the compiled code is then cached for future function calls)
+# The estimation of the largest interior rectangle is not yet implemented in OpenCV,
+# but a Numba Implementation by my own. You check out the details here.
+# Compiling the Code takes a bit (only once, the compiled code is then
+# cached for future function calls)
 lir = cropper.estimate_largest_interior_rectangle(mask)
 # After compilation the estimation is really fast:
 lir = cropper.estimate_largest_interior_rectangle(mask)
