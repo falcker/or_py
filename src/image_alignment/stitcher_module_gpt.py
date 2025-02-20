@@ -81,22 +81,43 @@ def process_timelapse(warped_final_imgs, final_corners, final_sizes):
         timelapser.process_frame(img, corner)
 
 
-def crop_images(warped_low_imgs, warped_low_masks, low_corners, low_sizes):
+def crop_images(
+    images,
+    warped_low_imgs,
+    warped_low_masks,
+    warped_final_imgs,
+    final_corners,
+    final_sizes,
+    low_corners,
+    low_sizes,
+):
     cropper = Cropper()
     mask = cropper.estimate_panorama_mask(
         warped_low_imgs, warped_low_masks, low_corners, low_sizes
     )
+    lir_aspect = images.get_ratio(
+        Images.Resolution.LOW, Images.Resolution.FINAL
+    )  # since lir was obtained on low imgs
     lir = cropper.estimate_largest_interior_rectangle(mask)
     lir.draw_on(mask, size=2)
     low_corners = cropper.get_zero_center_corners(low_corners)
-    rectangles = cropper.get_rectangles(low_corners, low_sizes)
-    overlap = cropper.get_overlap(rectangles[1], lir)
-    intersection = cropper.get_intersection(rectangles[1], overlap)
+    # rectangles = cropper.get_rectangles(low_corners, low_sizes)
+    # overlap = cropper.get_overlap(rectangles[1], lir)
+    # intersection = cropper.get_intersection(rectangles[1], overlap)
+    final_corners, final_sizes = cropper.crop_rois(
+        final_corners, final_sizes, lir_aspect
+    )
+    final_corners, final_sizes = cropper.crop_rois(
+        final_corners, final_sizes, lir_aspect
+    )
 
     cropper.prepare(warped_low_imgs, warped_low_masks, low_corners, low_sizes)
     return {
         "cropped_low_imgs": list(cropper.crop_images(warped_low_imgs)),
         "cropped_low_masks": list(cropper.crop_images(warped_low_masks)),
+        "cropped_final_imgs": list(cropper.crop_images(warped_final_imgs, lir_aspect)),
+        "final_corners": final_corners,
+        "final_sizes": final_sizes,
     }
 
 
@@ -117,7 +138,7 @@ def main():
     cameras = estimate_cameras(features, matches)
     warped_images = warp_images(resized_images, cameras)
     process_timelapse(warped_images["warped_final"], images.sizes, images.sizes)
-    cropped_images = crop_images(warped_images["warped_low"], [], [], [])
+    cropped_images = crop_images(images, warped_images["warped_low"], [], [], [])
     export_images(
         cropped_images["cropped_low_imgs"], PACKAGE_ROOT / "data/output/stitching4"
     )

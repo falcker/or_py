@@ -1,10 +1,10 @@
 from image_alignment.stitcher_module import (
-    camera_corrector,
+    estimate_cameras,
     feature_matcher,
-    images_prepare_resolutions,
+    resize_images,
     feature_finder,
     process_timelapse,
-    subset,
+    subset_images,
     feature_matcher,
     warp_images,
 )
@@ -15,16 +15,16 @@ import cv2 as cv
 
 image_paths = [str(x) for x in get_photo_stream_paths()]
 
-images_container = images_prepare_resolutions(image_paths)
+images_container = resize_images(image_paths)
 
 features = feature_finder(images_container.medium_quality_images)
 matcher = FeatureMatcher()
 
 matches = feature_matcher(images_container.medium_quality_images, features, matcher)
 
-images_container = subset(images_container, matcher, matches, features)
+images_container = subset_images(images_container, matcher, matches, features)
 
-cameras = camera_corrector(features, matches)
+cameras = estimate_cameras(features, matches)
 
 warped_images = warp_images(images_container, cameras)
 
