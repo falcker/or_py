@@ -91,6 +91,22 @@ def plot_image(img, figsize_in_inches=(5, 5)):
     plt.show()
 
 
+def save_image(img: np.ndarray | cv.typing.MatLike | Image.Image, path: Path | str):
+    if isinstance(img, np.ndarray) or isinstance(img, cv.typing.MatLike):
+        im = Image.fromarray(cv.cvtColor(img, cv.COLOR_BGR2RGB))
+    im.save(path)
+
+
+def save_images(
+    images: list[np.ndarray | cv.typing.MatLike] | Images,
+    output_dir: Path,
+    prefix: str = "img",
+):
+    # if isinstance(images[0], np.ndarray) or isinstance(images[0], cv.typing.MatLike):
+    for idx, image in enumerate(images):
+        save_image(image, output_dir / f"{prefix}_{idx+1:03d}.jpg")
+
+
 def plot_images(images, figsize_in_inches=(5, 5)):
     fig, axs = plt.subplots(1, len(images), figsize=figsize_in_inches)
     for col, img in enumerate(images):
@@ -434,11 +450,11 @@ def crop_images(
         cropper = Cropper()
 
     # We can estimate a panorama mask of the potential final panorama (using a Blender which will be introduced later)
-    mask = cropper.estimate_panorama_mask(
-        warped_images.warped_low_images,
-        warped_images.warped_low_masks,
-        warped_images.low_corners,
-        warped_images.low_sizes,
+    sm_mask = sm_cropper.estimate_panorama_mask(
+        sm_warped_images.warped_low_images,
+        sm_warped_images.warped_low_masks,
+        sm_warped_images.low_corners,
+        sm_warped_images.low_sizes,
     )
     # plot_image(mask, (5, 5))
 
@@ -533,12 +549,12 @@ def process_timelapse(
     for img, corner in zip(images, final_corners):
         timelapser.process_frame(img, corner)
         frame = timelapser.get_frame()
-        plot_image(frame, (10, 10))
+        # plot_image(frame, (10, 10))
     return timelapser
 
 
-def export_images(
-    cropped_final_images,
+def export_timelapse(
+    images,  # cropped_final_images,
     final_corners,
     final_sizes,
     output_dir=PACKAGE_ROOT / "data/output/stitched2",
@@ -554,11 +570,10 @@ def export_images(
         output_dir.mkdir(parents=True, exist_ok=False)
     if not output_dir.exists():
         output_dir.mkdir(parents=True, exist_ok=True)
-    for idx, (img, corner) in enumerate(zip(cropped_final_images, final_corners)):
+    for idx, (img, corner) in enumerate(zip(images, final_corners)):
         timelapser.process_frame(img, corner)
         frame = timelapser.get_frame()
-        im = Image.fromarray(cv.cvtColor(frame, cv.COLOR_BGR2RGB))
-        im.save(output_dir / f"{idx+1}.jpg")
+        save_image(frame, output_dir / f"{idx+1}.jpg")
 
 
 # https://github.com/OpenStitching/stitching_tutorial/blob/master/Stitching%20Tutorial.ipynb
@@ -582,11 +597,11 @@ def main():
         warped_images.low_sizes,
     )
     cropped_images = crop_images(images, warped_images)
-    export_images(
+    export_timelapse(
         cropped_images.cropped_final_images,
         images.sizes,
         images.sizes,
-        PACKAGE_ROOT / "data/output/stitching5",
+        PACKAGE_ROOT / "data/output/stitching_module",
     )
 
 

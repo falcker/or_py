@@ -109,7 +109,7 @@ The inliers are calculated using the random sample consensus (RANSAC) method, e.
 conf_matrix = matcher.get_confidence_matrix(matches)
 plt.imshow(conf_matrix)
 df_cm = pd.DataFrame(
-    conf_matrix, index=[i for i in "ABCDEFGHIJK"], columns=[i for i in "ABCDEFGHIJK"]
+    conf_matrix, index=[i for i in "ABCDE"], columns=[i for i in "ABCDE"]
 )
 sn.heatmap(df_cm, annot=True)
 
@@ -286,7 +286,8 @@ timelapser = Timelapser("as_is")
 timelapser.initialize(final_corners, final_sizes)
 
 # export images
-output_dir = PACKAGE_ROOT / "data/output/stitching3"
+output_dir = PACKAGE_ROOT / "data/output/stitching_archive"
+output_dir.mkdir(parents=True, exist_ok=True)
 for idx, (img, corner) in enumerate(zip(cropped_final_imgs, final_corners)):
     timelapser.process_frame(img, corner)
     frame = timelapser.get_frame()

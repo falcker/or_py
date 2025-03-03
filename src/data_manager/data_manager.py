@@ -23,7 +23,7 @@ and what the weather/lighting condition were at the time of taking the image.
 
 
 def get_photo_stream_root_dir() -> Path:
-    return PACKAGE_ROOT / r"data/input"
+    return PACKAGE_ROOT / r"data/input/PhotoStream"
 
 
 def get_photo_stream_paths() -> list[Path]:

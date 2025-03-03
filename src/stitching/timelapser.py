@@ -45,7 +45,7 @@ class Timelapser:
         img = img.astype(np.int16)
         self.timelapser.process(img, mask, corner)
 
-    def get_frame(self):
+    def get_frame(self) -> cv.typing.MatLike:
         frame = self.timelapser.getDst()
         frame = np.float32(cv.UMat.get(frame))
         frame = cv.convertScaleAbs(frame)
