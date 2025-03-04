@@ -76,6 +76,8 @@ class CroppedImagesContainer:
     cropped_low_images: list[np.ndarray]
     cropped_final_masks: list[np.ndarray]
     cropped_final_images: list[np.ndarray]
+    cropped_final_corners: list[tuple[float, float]]
+    cropped_final_sizes: list[tuple[float, float]]
 
 
 @dataclass
@@ -450,11 +452,11 @@ def crop_images(
         cropper = Cropper()
 
     # We can estimate a panorama mask of the potential final panorama (using a Blender which will be introduced later)
-    sm_mask = sm_cropper.estimate_panorama_mask(
-        sm_warped_images.warped_low_images,
-        sm_warped_images.warped_low_masks,
-        sm_warped_images.low_corners,
-        sm_warped_images.low_sizes,
+    mask = cropper.estimate_panorama_mask(
+        warped_images.warped_low_images,
+        warped_images.warped_low_masks,
+        warped_images.low_corners,
+        warped_images.low_sizes,
     )
     # plot_image(mask, (5, 5))
 
@@ -527,6 +529,8 @@ def crop_images(
         cropped_low_images,
         cropped_final_masks,
         cropped_final_images,
+        final_corners,
+        final_sizes,
     )
 
 
@@ -549,7 +553,7 @@ def process_timelapse(
     for img, corner in zip(images, final_corners):
         timelapser.process_frame(img, corner)
         frame = timelapser.get_frame()
-        # plot_image(frame, (10, 10))
+        plot_image(frame, (10, 10))
     return timelapser
 
 
@@ -590,17 +594,17 @@ def main():
     )
     cameras = estimate_cameras(features, matches)
     warped_images = warp_images(images, resized_images, cameras)
-    process_timelapse(warped_images.warped_final_images, images.sizes, images.sizes)
-    process_timelapse(
-        warped_images.warped_low_images,
-        warped_images.low_sizes,
-        warped_images.low_sizes,
-    )
+    # process_timelapse(warped_images.warped_final_images, images.sizes, images.sizes)
+    # process_timelapse(
+    #     warped_images.warped_low_images,
+    #     warped_images.low_sizes,
+    #     warped_images.low_sizes,
+    # )
     cropped_images = crop_images(images, warped_images)
     export_timelapse(
         cropped_images.cropped_final_images,
-        images.sizes,
-        images.sizes,
+        cropped_images.cropped_final_corners,
+        cropped_images.cropped_final_sizes,
         PACKAGE_ROOT / "data/output/stitching_module",
     )
 
