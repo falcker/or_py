@@ -3,7 +3,7 @@ from pathlib import Path
 import json
 
 from config import PACKAGE_ROOT
-from data_manager.datamodel import CollectionRounds, PhotoStream
+from data_manager.models.datamodel import CollectionRounds, PhotoStream
 
 # TODO
 # 1 read PhotoStream metadata (json)

@@ -4,6 +4,8 @@ from enum import Enum
 import json
 from pathlib import Path
 
+from PIL import Image
+
 
 @dataclass
 class FileName:
@@ -41,6 +43,7 @@ class PhotoInfo:
     photostream_id: int
     filename: FileName
     file_path: Path
+    image: Image = field(init=False)
 
     def __eq__(self, value):
         eq = False

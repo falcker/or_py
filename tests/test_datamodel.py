@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from data_manager.data_manager import collection_round_to_streams
-from data_manager.datamodel import (
+from data_manager.models.datamodel import (
     CollectionRound,
     CollectionRounds,
     FileName,
