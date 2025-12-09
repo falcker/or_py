@@ -34,11 +34,5 @@ annotated_image = sv.MaskAnnotator(color=sv.ColorPalette.ROBOFLOW).annotate(
 annotated_image = sv.LabelAnnotator(color=sv.ColorPalette.ROBOFLOW).annotate(
     annotated_image, detections, labels
 )
-annotated_image = sv.MaskAnnotator(color=sv.ColorPalette.ROBOFLOW).annotate(
-    annotated_image, detections
-)
-annotated_image = sv.LabelAnnotator(color=sv.ColorPalette.ROBOFLOW).annotate(
-    annotated_image, detections, labels
-)
 
 annotated_image.save("annotated_image.jpg")
