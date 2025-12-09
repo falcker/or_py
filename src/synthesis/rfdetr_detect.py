@@ -7,7 +7,7 @@ from rfdetr import RFDETRSegPreview
 # from rfdetr import
 from rfdetr.util.coco_classes import COCO_CLASSES
 
-weights_path = r"C:\AI\repos\or_py\src\synthesis\roof_segment_m1.0_d1.2_v4_weights.pt"
+weights_path = r"C:\AI\repos\or_py\src\synthesis\weights.pt"
 image_path = r"C:\AI\repos\or_py\src\synthesis\230622-F01.jpg"
 
 model = RFDETRSegPreview(
@@ -34,6 +34,11 @@ annotated_image = sv.MaskAnnotator(color=sv.ColorPalette.ROBOFLOW).annotate(
 annotated_image = sv.LabelAnnotator(color=sv.ColorPalette.ROBOFLOW).annotate(
     annotated_image, detections, labels
 )
+annotated_image = sv.MaskAnnotator(color=sv.ColorPalette.ROBOFLOW).annotate(
+    annotated_image, detections
+)
+annotated_image = sv.LabelAnnotator(color=sv.ColorPalette.ROBOFLOW).annotate(
+    annotated_image, detections, labels
+)
 
 annotated_image.save("annotated_image.jpg")
-
