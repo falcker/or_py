@@ -1,7 +1,9 @@
 from datetime import datetime
+import shutil
+from contextlib import suppress
 import json
 import re
-from typing import Any, Optional
+from typing import Any, Optional, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pycocotools.coco import COCO
 from pathlib import Path
@@ -9,8 +11,11 @@ from pathlib import Path
 from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from sympy import root
 
+import random
+import math
+
+from collections import defaultdict, Counter
 
 class Extra(BaseModel):
     name: Optional[str] = None
@@ -30,7 +35,7 @@ class COCOImage(BaseModel):
     # Accept ANY raw value first
     extra: Optional[Extra] = None
 
-    def _asset_name(self) -> str:
+    def _extract_asset_name(self) -> str:
         poss_name = self.file_name.split(".rf")[0]
         # poss_name = re.sub(r"^.*?_(\d+)_", r"\1_", poss_name)  # Extract tank number
         poss_name = (
@@ -46,7 +51,7 @@ class COCOImage(BaseModel):
         poss_name = re.sub(
             r"^\d+_*-*\d*", "", poss_name
         )  # Remove everything up to the last number and underscore
-        poss_name = re.findall(r"[F|T]-*_*\d+", poss_name)[0]
+        poss_name = re.findall(r"[FT]-*_*\d+", poss_name)[0]
         poss_name = poss_name.replace("_", "").replace("-", "")
         poss_name = poss_name.replace("T", "F")
 
@@ -55,9 +60,48 @@ class COCOImage(BaseModel):
         self.asset_name = poss_name
         return poss_name
 
+    def _extract_date(self) -> Optional[datetime]:
+        # Try to extract date from filename using regex
+        # Either match (eroneous) YYYYMMDD, YYYYMMDD or YYMMDD format
+        date_match = re.search(r"^(\d{4})[-_]?(\d{2})[-_]?(\d{3})", self.file_name)
+        new_datetime = None
+        if date_match:
+            year, month, day = date_match.groups()
+            try:
+                new_datetime = datetime(int(year), int(month), int(day))
+                self.date_captured = new_datetime
+                return new_datetime
+            except ValueError:
+                pass  # Invalid date, ignore
+
+        date_match = re.search(r"(\d{4})[-_]?(\d{2})[-_]?(\d{2})", self.file_name)
+        new_datetime = None
+        if date_match:
+            year, month, day = date_match.groups()
+            try:
+                new_datetime = datetime(int(year), int(month), int(day))
+                self.date_captured = new_datetime
+                return new_datetime
+            except ValueError:
+                pass  # Invalid date, ignore
+        date_match = re.search(r"(\d{2})[-_]?(\d{2})[-_]?(\d{2})", self.file_name)
+        if date_match:
+            year, month, day = date_match.groups()
+            try:
+                new_datetime = datetime(int(year) + 2000, int(month), int(day))
+                self.date_captured = new_datetime
+                return new_datetime
+            except ValueError:
+                pass  # Invalid date, ignore
+        return None
+
+    def _validate_date(self):
+        
+
+
     def normalize_filename(self, location: Optional[str] = None) -> str:
         if not self.asset_name:
-            self._asset_name()
+            self._extract_asset_name()
         assetname = self.asset_name
         date = (
             self.date_captured.strftime("%Y%m%d") if self.date_captured else "unknown"
@@ -68,13 +112,35 @@ class COCOImage(BaseModel):
         if location:
             filename += f"_{location}"
         filename += ".jpg"  # Assuming jpg
+
         self.file_name = filename
         return filename
+    
+    def build_base_filename(self, location: Optional[str] = None) -> str:
+        if not self.asset_name:
+            self._extract_asset_name()
+
+        date = (
+            self.date_captured.strftime("%Y%m%d")
+            if self.date_captured
+            else "unknown"
+        )
+
+        base = f"{self.asset_name}_{date}"
+        if location:
+            base += f"_{location}"
+
+        return base
+
+
+    def __eq__(self, value:Self) -> bool:
+        return self.file_name == value.file_name and self.date_captured == value.date_captured and self.asset_name == value.asset_name
 
     @model_validator(mode="after")
     def validate_and_extract_assetname(self):
         self.original_file_name = self.file_name
-        self._asset_name()
+        self._extract_asset_name()
+        self._extract_date()
         return self
 
 
@@ -190,6 +256,50 @@ class COCODataset(BaseModel):
         else:
             plt.show()
 
+
+    def to_coco_dict(self) -> dict:
+        """
+        Convert dataset back to standard COCO JSON structure.
+        Removes internal indices and converts datetime fields.
+        """
+        return {
+            "images": [
+                img.model_dump(
+                    exclude={"original_file_name"}  # not part of official COCO
+                )
+                for img in self.images
+            ],
+            "annotations": [
+                ann.model_dump()
+                for ann in self.annotations
+            ],
+            "categories": [
+                cat.model_dump()
+                for cat in self.categories
+            ],
+        }
+
+    def save(self, path: Path):
+        """
+        Save dataset to COCO JSON file.
+        """
+        def serialize_datetime(obj):
+            if isinstance(obj, datetime):
+                return obj.strftime("%Y-%m-%d %H:%M:%S")
+            return obj
+    
+        coco_dict = self.to_coco_dict()
+
+        with open(path, "w") as f:
+            json.dump(
+                coco_dict,
+                f,
+                indent=4,
+                default=lambda o: serialize_datetime(o)
+            )
+
+
+
     @model_validator(mode="after")
     def validate_and_build_index(self):
         self.build_index()
@@ -285,8 +395,20 @@ class DataSetMeta(BaseModel):
     def normalize_filenames(self, location: Optional[str] = None):
         if self.all_COCO is None:
             self.merge_self()
+
+        name_counter: dict[str, int] = {}
+
         for img in self.all_COCO.images:
-            img.normalize_filename(location=location)
+            base_name = img.build_base_filename(location)
+
+            count = name_counter.get(base_name, 0)
+            name_counter[base_name] = count + 1
+
+            if count > 0:
+                img.file_name = f"{base_name}_{count:02d}.jpg"
+            else:
+                img.file_name = f"{base_name}.jpg"
+
 
     def change_filenames_on_dir(self):
         if not self.all_COCO:
@@ -294,8 +416,13 @@ class DataSetMeta(BaseModel):
         for img in self.all_COCO.images:
             old_path = self.root_path / img.subset / img.original_file_name
             new_path = self.root_path / img.subset / img.file_name
-            if old_path.exists():
-                old_path.rename(new_path)
+            if not old_path.exists():
+                print(f"Warning: {old_path} does not exist. Skipping rename.")
+                continue
+            if new_path.exists():
+                print(f"Warning: {new_path} already exists. Skipping rename of {old_path}.")
+                continue
+            old_path.rename(new_path)
 
     # --- convenience dataset-wide methods ---
     def summary(self):
@@ -325,3 +452,512 @@ class DataSetMeta(BaseModel):
         merged = self.merge([self.train_COCO, self.valid_COCO, self.test_COCO])
         self.all_COCO = merged
         return merged
+
+    # --- dataset manipulation methods ---
+
+    def move_images_meta(
+        self,
+        source: str,
+        target: str,
+        *,
+        asset_names: set[str] | None = None,
+        tags: set[str] | None = None,
+    ):
+        """
+        Move images from one subset to another based on:
+        - asset_names
+        - user_tags
+
+        DOESN'T MOVE IMAGES ON DISK, ONLY IN THE COCO STRUCTURE. CALL change_filenames_on_dir() TO REFLECT CHANGES ON DISK
+        """
+
+        source_ds: COCODataset = getattr(self, f"{source}_COCO")
+        target_ds: COCODataset = getattr(self, f"{target}_COCO")
+
+        images_to_move = []
+
+        for img in source_ds.images:
+            move = False
+
+            if asset_names and img.asset_name in asset_names:
+                move = True
+
+            if tags and img.extra:
+                if any(tag in tags for tag in img.extra.user_tags):
+                    move = True
+
+            if move:
+                images_to_move.append(img)
+
+        # Move images + annotations
+        for img in images_to_move:
+            source_ds.images.remove(img)
+            target_ds.images.append(img)
+            img.subset = target
+
+            anns = source_ds.ann_by_image.get(img.id, [])
+
+            for ann in anns:
+                source_ds.annotations.remove(ann)
+                target_ds.annotations.append(ann)
+
+        source_ds.build_index()
+        target_ds.build_index()
+
+        print(f"Moved {len(images_to_move)} images from {source} to {target}")
+
+    def move_images_atomic(
+        self,
+        source: str,
+        target: str,
+        *,
+        asset_names: set[str] | None = None,
+        tags: set[str] | None = None,
+    ):
+        source_ds: COCODataset = getattr(self, f"{source}_COCO")
+        target_ds: COCODataset = getattr(self, f"{target}_COCO")
+
+        source_root: Path = getattr(self, f"{source}_root_path")
+        target_root: Path = getattr(self, f"{target}_root_path")
+
+        images_to_move = []
+
+        # ---------------------------------------
+        # Select images
+        # ---------------------------------------
+        for img in source_ds.images:
+            move = False
+
+            if asset_names and img.asset_name in asset_names:
+                move = True
+
+            if tags and img.extra:
+                if any(tag in tags for tag in img.extra.user_tags):
+                    move = True
+
+            if move:
+                images_to_move.append(img)
+
+        if not images_to_move:
+            return 0
+
+        # ---------------------------------------
+        # Phase 1 — Validate all moves first
+        # ---------------------------------------
+        planned_moves = []
+
+        for img in images_to_move:
+            old_path = source_root / img.file_name
+            new_path = target_root / img.file_name
+
+            if not old_path.exists():
+                raise FileNotFoundError(f"Missing source file: {old_path}")
+
+            if new_path.exists():
+                raise FileExistsError(f"Target already exists: {new_path}")
+
+            planned_moves.append((img, old_path, new_path))
+
+        # ---------------------------------------
+        # Phase 2 — Move files (with rollback)
+        # ---------------------------------------
+        moved_files = []
+
+        try:
+            for img, old_path, new_path in planned_moves:
+                shutil.move(str(old_path), str(new_path))
+                moved_files.append((old_path, new_path))
+
+            # ---------------------------------------
+            # Phase 3 — Update metadata
+            # ---------------------------------------
+            for img in images_to_move:
+                source_ds.images.remove(img)
+                target_ds.images.append(img)
+                img.subset = target
+
+                anns = source_ds.ann_by_image.get(img.id, [])
+                for ann in anns:
+                    source_ds.annotations.remove(ann)
+                    target_ds.annotations.append(ann)
+
+            source_ds.build_index()
+            target_ds.build_index()
+
+        except Exception as e:
+            # Rollback filesystem
+            for old_path, new_path in reversed(moved_files):
+                with suppress(Exception):
+                    shutil.move(str(new_path), str(old_path))
+            raise RuntimeError("Atomic move failed — rolled back.") from e
+
+        return len(images_to_move)
+
+
+    def rebalance_dataset(
+        self,
+        train_ratio: float = 0.7,
+        valid_ratio: float = 0.2,
+        test_ratio: float = 0.1,
+        *,
+        group_by_asset: bool = True,
+        seed: int = 42,
+    ):
+        """
+        Rebalance entire dataset across splits.
+        Atomic. Deterministic.
+        """
+
+        if not math.isclose(train_ratio + valid_ratio + test_ratio, 1.0):
+            raise ValueError("Ratios must sum to 1.0")
+
+        self.merge_self()
+        all_ds = self.all_COCO
+
+        random.seed(seed)
+
+        # ---------------------------------------
+        # Group images
+        # ---------------------------------------
+        if group_by_asset:
+            grouped = defaultdict(list)
+            for img in all_ds.images:
+                grouped[img.asset_name].append(img)
+            groups = list(grouped.values())
+        else:
+            groups = [[img] for img in all_ds.images]
+
+        random.shuffle(groups)
+
+        total = sum(len(g) for g in groups)
+
+        train_target = int(total * train_ratio)
+        valid_target = int(total * valid_ratio)
+
+        new_split = {
+            "train": [],
+            "valid": [],
+            "test": [],
+        }
+
+        count = 0
+
+        for group in groups:
+            if count < train_target:
+                new_split["train"].extend(group)
+            elif count < train_target + valid_target:
+                new_split["valid"].extend(group)
+            else:
+                new_split["test"].extend(group)
+
+            count += len(group)
+
+        # ---------------------------------------
+        # Clear old splits
+        # ---------------------------------------
+        for split in ["train", "valid", "test"]:
+            ds = getattr(self, f"{split}_COCO")
+            ds.images.clear()
+            ds.annotations.clear()
+
+        # ---------------------------------------
+        # Reassign images + annotations
+        # ---------------------------------------
+        for split, imgs in new_split.items():
+            ds = getattr(self, f"{split}_COCO")
+
+            for img in imgs:
+                img.subset = split
+                ds.images.append(img)
+
+                anns = all_ds.ann_by_image.get(img.id, [])
+                ds.annotations.extend(anns)
+
+            ds.build_index()
+
+        return {
+            "train": len(new_split["train"]),
+            "valid": len(new_split["valid"]),
+            "test": len(new_split["test"]),
+        }
+
+
+    def rebalance_time_aware(
+        self,
+        train_ratio: float = 0.7,
+        valid_ratio: float = 0.2,
+        test_ratio: float = 0.1,
+    ):
+        """
+        Asset-grouped, time-aware split.
+
+        - All images of a tank stay together
+        - Within tank: chronological split
+        - Deterministic
+        """
+
+        if not math.isclose(train_ratio + valid_ratio + test_ratio, 1.0):
+            raise ValueError("Ratios must sum to 1.0")
+
+        self.merge_self()
+        all_ds = self.all_COCO
+
+        # ------------------------------
+        # Group by asset
+        # ------------------------------
+        grouped = defaultdict(list)
+
+        for img in all_ds.images:
+            if not img.date_captured:
+                raise ValueError(
+                    f"Image {img.file_name} has no date_captured."
+                )
+            grouped[img.asset_name].append(img)
+
+        new_split = {
+            "train": [],
+            "valid": [],
+            "test": [],
+        }
+
+        # ------------------------------
+        # Split per asset chronologically
+        # ------------------------------
+        for asset, imgs in grouped.items():
+            imgs.sort(key=lambda x: x.date_captured)
+
+            n = len(imgs)
+            train_end = int(n * train_ratio)
+            valid_end = train_end + int(n * valid_ratio)
+
+            new_split["train"].extend(imgs[:train_end])
+            new_split["valid"].extend(imgs[train_end:valid_end])
+            new_split["test"].extend(imgs[valid_end:])
+
+        # ------------------------------
+        # Clear old splits
+        # ------------------------------
+        for split in ["train", "valid", "test"]:
+            ds = getattr(self, f"{split}_COCO")
+            ds.images.clear()
+            ds.annotations.clear()
+
+        # ------------------------------
+        # Reassign images + annotations
+        # ------------------------------
+        for split, imgs in new_split.items():
+            ds = getattr(self, f"{split}_COCO")
+
+            for img in imgs:
+                img.subset = split
+                ds.images.append(img)
+
+                anns = all_ds.ann_by_image.get(img.id, [])
+                ds.annotations.extend(anns)
+
+            ds.build_index()
+
+        return {
+            "train": len(new_split["train"]),
+            "valid": len(new_split["valid"]),
+            "test": len(new_split["test"]),
+        }
+
+
+    def sync_files_to_subsets_atomic(self):
+        """
+        Move files so they match img.subset.
+        Fully atomic with rollback.
+        """
+
+        moves = []
+
+        for split in ["train", "valid", "test"]:
+            ds = getattr(self, f"{split}_COCO")
+            target_root = getattr(self, f"{split}_root_path")
+
+            for img in ds.images:
+                correct_path = target_root / img.file_name
+
+                # Find where file currently exists
+                for other_split in ["train", "valid", "test"]:
+                    other_root = getattr(self, f"{other_split}_root_path")
+                    candidate = other_root / img.file_name
+
+                    if candidate.exists() and candidate != correct_path:
+                        moves.append((candidate, correct_path))
+
+        # Validate
+        for src, dst in moves:
+            if dst.exists():
+                raise FileExistsError(f"Collision: {dst}")
+
+        moved = []
+
+        try:
+            for src, dst in moves:
+                shutil.move(str(src), str(dst))
+                moved.append((src, dst))
+        except Exception as e:
+            # Rollback
+            for src, dst in reversed(moved):
+                with suppress(Exception):
+                    shutil.move(str(dst), str(src))
+            raise RuntimeError("Atomic sync failed — rolled back.") from e
+
+    def audit_leakage(self):
+        tank_map = {}
+
+        for split in ["train", "valid", "test"]:
+            ds = getattr(self, f"{split}_COCO")
+            for img in ds.images:
+                tank_map.setdefault(img.asset_name, set()).add(split)
+
+        leakage = {
+            tank: splits
+            for tank, splits in tank_map.items()
+            if len(splits) > 1
+        }
+
+        return leakage
+
+    # Metrics
+
+
+
+    def full_audit_report(self) -> dict:
+        """
+        Comprehensive dataset audit report.
+        Returns structured dictionary.
+        """
+
+        report = {}
+
+        splits = ["train", "valid", "test"]
+
+        # -----------------------------------------------------
+        # 1️⃣ Structural Integrity
+        # -----------------------------------------------------
+
+        image_ids = set()
+        filenames = set()
+        duplicate_ids = set()
+        duplicate_filenames = set()
+        orphan_annotations = []
+        missing_dates = []
+        missing_assets = []
+
+        for split in splits:
+            ds = getattr(self, f"{split}_COCO")
+
+            for img in ds.images:
+                if img.id in image_ids:
+                    duplicate_ids.add(img.id)
+                image_ids.add(img.id)
+
+                if img.file_name in filenames:
+                    duplicate_filenames.add(img.file_name)
+                filenames.add(img.file_name)
+
+                if not img.date_captured:
+                    missing_dates.append(img.file_name)
+
+                if not img.asset_name:
+                    missing_assets.append(img.file_name)
+
+            for ann in ds.annotations:
+                if ann.image_id not in image_ids:
+                    orphan_annotations.append(ann.id)
+
+        report["integrity"] = {
+            "duplicate_image_ids": list(duplicate_ids),
+            "duplicate_filenames": list(duplicate_filenames),
+            "orphan_annotations": orphan_annotations,
+            "missing_dates": missing_dates,
+            "missing_asset_names": missing_assets,
+        }
+
+        # -----------------------------------------------------
+        # 2️⃣ Leakage Detection
+        # -----------------------------------------------------
+
+        asset_map = defaultdict(set)
+        time_ranges = {}
+
+        for split in splits:
+            ds = getattr(self, f"{split}_COCO")
+            dates = []
+
+            for img in ds.images:
+                asset_map[img.asset_name].add(split)
+                if img.date_captured:
+                    dates.append(img.date_captured)
+
+            if dates:
+                time_ranges[split] = (min(dates), max(dates))
+            else:
+                time_ranges[split] = (None, None)
+
+        asset_leakage = {
+            asset: list(splits)
+            for asset, splits in asset_map.items()
+            if len(splits) > 1
+        }
+
+        temporal_leakage = False
+        if all(time_ranges[s][1] for s in splits):
+            train_max = time_ranges["train"][1]
+            valid_min = time_ranges["valid"][0]
+            test_min = time_ranges["test"][0]
+
+            if valid_min and train_max and valid_min < train_max:
+                temporal_leakage = True
+            if test_min and train_max and test_min < train_max:
+                temporal_leakage = True
+
+        report["leakage"] = {
+            "asset_leakage": asset_leakage,
+            "temporal_leakage_detected": temporal_leakage,
+        }
+
+        # -----------------------------------------------------
+        # 3️⃣ Distribution Analysis
+        # -----------------------------------------------------
+
+        split_stats = {}
+
+        for split in splits:
+            ds = getattr(self, f"{split}_COCO")
+
+            class_counts = ds.category_counts()
+            tank_counts = Counter(img.asset_name for img in ds.images)
+
+            split_stats[split] = {
+                "image_count": len(ds.images),
+                "annotation_count": len(ds.annotations),
+                "class_distribution": class_counts,
+                "tank_distribution": dict(tank_counts),
+                "time_range": time_ranges[split],
+            }
+
+        report["distribution"] = split_stats
+
+        # -----------------------------------------------------
+        # 4️⃣ Imbalance Metrics
+        # -----------------------------------------------------
+
+        total_images = sum(split_stats[s]["image_count"] for s in splits)
+
+        imbalance = {}
+
+        for split in splits:
+            proportion = split_stats[split]["image_count"] / total_images if total_images else 0
+            imbalance[split] = proportion
+
+        report["split_proportions"] = imbalance
+
+        return report
+
+    def print_audit(self):
+        import pprint
+        pprint.pprint(self.full_audit_report(), width=120)
