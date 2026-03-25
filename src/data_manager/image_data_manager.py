@@ -1,9 +1,13 @@
 from ast import parse
+from enum import auto
+from hmac import new
+from math import e
 from pathlib import Path
 from time import strftime
 
 from cv2 import data
 from sympy import root
+from torch import ne
 
 from data_manager.filename_parser import parse_filename
 from data_manager.models.datamodel import FileName, DataFile
@@ -133,19 +137,31 @@ def rename_by(data_file: DataFile, by: list[str] = ["asset","date_time"]) -> str
 def rename_default(data_file: DataFile) -> str:
     return rename_by(data_file, by=["asset","date_time"])
 
-def rename_file(data_file: DataFile, new_name_func) -> DataFile:
+def rename_file(data_file: DataFile, new_name_func, auto_increment: bool = True) -> DataFile|bool:
     new_name = new_name_func(data_file)
     new_path = data_file.path.parent / new_name
+    if new_path.exists():
+        if auto_increment:
+            base_name = new_path.stem
+            suffix = new_path.suffix
+            i = 1
+            while new_path.exists():
+                new_path = data_file.path.parent / f"{base_name}_{i}{suffix}"
+                i += 1
+        raise FileExistsError(f"Target file {new_path} already exists and auto-increment is disabled.")
     data_file.path.rename(new_path)
     return DataFile(new_path, data_file.filename)
 
-def rename_files(data_files: list[DataFile], new_name_func) -> list[DataFile]:
+def rename_files(data_files: list[DataFile], new_name_func, auto_increment: bool = True) -> list[DataFile]:
     renamed_files = []
     for data_file in data_files:
-        new_name = new_name_func(data_file)
-        new_path = data_file.path.parent / new_name
-        data_file.path.rename(new_path)
-        renamed_files.append(DataFile(new_path, data_file.filename))
+        try:
+            renamed_file = rename_file(data_file, new_name_func, auto_increment)
+        except FileExistsError as e:
+            print(f"Warning: Could not rename {data_file.path} to {new_name_func(data_file)} because the target file already exists.")
+            continue
+        renamed_files.append(renamed_file)
+        
     return renamed_files
 
 def default_rename_files(data_files: list[DataFile]) -> list[DataFile]:
