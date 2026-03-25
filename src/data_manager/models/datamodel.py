@@ -3,40 +3,54 @@ from datetime import datetime
 from enum import Enum
 import json
 from pathlib import Path
+from typing import Optional
 
 from PIL import Image
 
 
+# @dataclass
+# class FileName:
+#     asset: str
+#     component: str
+#     date_time: datetime
+#     guid: str
+
+#     @classmethod
+#     def from_filename(cls, filename: str):
+#         split = filename.split(".")
+#         if len(split) > 1:
+#             filename = split[0]
+#         filename = filename.replace("_", "-")
+#         splitted = filename.split("[")
+#         if len(splitted) == 1:
+#             # old string
+#             splitted3 = splitted[0].split("-")
+#             date_time = datetime.strptime(splitted3[1], "%Y%m%d%H%M%S")
+#             asset = splitted3[4]
+#             component = "-".join(splitted3[5:])
+#             return FileName(asset, component, date_time, "")
+
+#         splitted2 = splitted[-1].split("-")
+#         asset = splitted2[0]
+#         component = "-".join(splitted2[1:])[0:-1]
+#         splitted3 = splitted[0].split("-")
+#         date_time = datetime.strptime(splitted3[1], "%Y%m%d%H%M%S")
+#         guid = splitted3[-2]
+#         return cls(asset, component, date_time, guid)
+
+
 @dataclass
 class FileName:
-    asset: str
-    component: str
-    date_time: datetime
-    guid: str
+    asset: Optional[str]
+    component: Optional[str]
+    date_time: Optional[datetime]
+    guid: Optional[str]
 
-    @classmethod
-    def from_filename(cls, filename: str):
-        split = filename.split(".")
-        if len(split) > 1:
-            filename = split[0]
-        filename = filename.replace("_", "-")
-        splitted = filename.split("[")
-        if len(splitted) == 1:
-            # old string
-            splitted3 = splitted[0].split("-")
-            date_time = datetime.strptime(splitted3[1], "%Y%m%d%H%M%S")
-            asset = splitted3[4]
-            component = "-".join(splitted3[5:])
-            return FileName(asset, component, date_time, "")
-
-        splitted2 = splitted[-1].split("-")
-        asset = splitted2[0]
-        component = "-".join(splitted2[1:])[0:-1]
-        splitted3 = splitted[0].split("-")
-        date_time = datetime.strptime(splitted3[1], "%Y%m%d%H%M%S")
-        guid = splitted3[-2]
-        return cls(asset, component, date_time, guid)
-
+@dataclass
+class DataFile:
+    path: Path
+    filename: FileName
+    
 
 @dataclass
 class PhotoInfo:

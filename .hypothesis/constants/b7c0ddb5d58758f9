@@ -1,0 +1,4 @@
+# file: C:\Users\MiloBuwalda\Documents\GitHub\or_py\src\data_manager\models\datamodel.py
+# hypothesis_version: 6.151.8
+
+['%Y%m%d%H%M%S', '%Y-%m-%d%H_%M_%S', '-', '.', '.jpeg', ';', '[', '_', 'asset', 'component', 'datetime', 'dry', 'filename', 'filepath', 'fog', 'guid', 'id', 'root_dir_name', 'semi dry', 'semi wet', 'w+', 'wet']

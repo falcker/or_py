@@ -2,8 +2,9 @@ from collections import defaultdict
 from pathlib import Path
 import json
 
-from config import PACKAGE_ROOT
+# from config import PACKAGE_ROOT
 from data_manager.models.datamodel import CollectionRounds, PhotoStream
+
 
 # TODO
 # 1 read PhotoStream metadata (json)
@@ -22,12 +23,12 @@ and what the weather/lighting condition were at the time of taking the image.
 # def collection_round_()
 
 
-def get_photo_stream_root_dir() -> Path:
+def get_photo_stream_root_dir(PACKAGE_ROOT: Path) -> Path:
     return PACKAGE_ROOT / r"data/input/PhotoStream"
 
 
-def get_photo_stream_paths() -> list[Path]:
-    return list(get_photo_stream_root_dir().iterdir())
+def get_photo_stream_paths(PACKAGE_ROOT: Path) -> list[Path]:
+    return list(get_photo_stream_root_dir(PACKAGE_ROOT).iterdir())
 
 
 def collection_round_to_streams(

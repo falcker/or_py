@@ -1,0 +1,4 @@
+# file: C:\Users\MiloBuwalda\Documents\GitHub\or_py\src\dataset\coco_models.py
+# hypothesis_version: 6.151.8
+
+[0.1, 0.2, 0.6, 0.7, 1.0, 120, 2000, '%Y%m%d', '%Y-%m-%d %H:%M:%S', '-', '.jpg', '.rf', 'COCODataset', 'DJI_*-*', 'F', 'F(\\d+)', 'JPG', 'README.roboflow.txt', 'RGB', 'Roof', 'T', '[FT]-*_*\\d+', '^\\d+_*-*\\d*', '_', '_png', 'after', 'annotation_count', 'annotations', 'asset_leakage', 'black', 'categories', 'class_distribution', 'distribution', 'duplicate_filenames', 'duplicate_image_ids', 'image_count', 'images', 'integrity', 'jpeg', 'jpg', 'leakage', 'missing_asset_names', 'missing_dates', 'none', 'off', 'original_file_name', 'orphan_annotations', 'r', 'split_proportions', 'tank_distribution', 'test', 'tight', 'time_range', 'train', 'unknown', 'valid', 'w', 'yellow']

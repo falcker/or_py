@@ -69,7 +69,6 @@ class COCOImage(BaseModel):
             year, month, day = date_match.groups()
             try:
                 new_datetime = datetime(int(year), int(month), int(day))
-                self.date_captured = new_datetime
                 return new_datetime
             except ValueError:
                 pass  # Invalid date, ignore
@@ -80,7 +79,6 @@ class COCOImage(BaseModel):
             year, month, day = date_match.groups()
             try:
                 new_datetime = datetime(int(year), int(month), int(day))
-                self.date_captured = new_datetime
                 return new_datetime
             except ValueError:
                 pass  # Invalid date, ignore
@@ -89,14 +87,15 @@ class COCOImage(BaseModel):
             year, month, day = date_match.groups()
             try:
                 new_datetime = datetime(int(year) + 2000, int(month), int(day))
-                self.date_captured = new_datetime
                 return new_datetime
             except ValueError:
                 pass  # Invalid date, ignore
         return None
 
     def _validate_date(self):
-        
+        date = self._extract_date()
+        if date:
+            self.date_captured = date
 
 
     def normalize_filename(self, location: Optional[str] = None) -> str:
@@ -140,7 +139,7 @@ class COCOImage(BaseModel):
     def validate_and_extract_assetname(self):
         self.original_file_name = self.file_name
         self._extract_asset_name()
-        self._extract_date()
+        self._validate_date()
         return self
 
 
@@ -184,6 +183,30 @@ class COCODataset(BaseModel):
 
     def get_annotations(self, img_id: int) -> list[COCOAnnotation]:
         return self.ann_by_image.get(img_id, [])
+
+    # -------------------------------------------------------
+    # analytics methods
+    # -------------------------------------------------------
+
+    def inspect_annotation_variants(self):
+        """
+        Prints summary statistics to help identify
+        different annotation types that share a category.
+        """
+
+        print("=== AREA DISTRIBUTION ===")
+        areas = sorted(ann.area for ann in self.annotations)
+        print(f"Min area: {min(areas)}")
+        print(f"Max area: {max(areas)}")
+        print(f"Median area: {areas[len(areas)//2]}")
+
+        print("\n=== WIDTH/HEIGHT RANGES ===")
+        widths = [ann.bbox[2] for ann in self.annotations]
+        heights = [ann.bbox[3] for ann in self.annotations]
+
+        print(f"Width range: {min(widths)} - {max(widths)}")
+        print(f"Height range: {min(heights)} - {max(heights)}")
+
 
     def category_counts(self) -> dict[int, int]:
         counts = {}
@@ -297,6 +320,42 @@ class COCODataset(BaseModel):
                 indent=4,
                 default=lambda o: serialize_datetime(o)
             )
+
+    # -------------------------------------------------------
+    # Convenience methods for dataset manipulation
+    # -------------------------------------------------------
+
+    def remove_annotations_by_tag_and_category(
+        self,
+        tags: set[str],
+        category_ids: set[int],
+    ) -> int:
+        """
+        Remove annotations only if:
+        - image has matching tag
+        - annotation category matches
+        """
+
+        tagged_image_ids = {
+            img.id
+            for img in self.images
+            if img.extra and any(tag in tags for tag in img.extra.user_tags)
+        }
+
+        original_count = len(self.annotations)
+
+        self.annotations = [
+            ann
+            for ann in self.annotations
+            if not (
+                ann.image_id in tagged_image_ids
+                and ann.category_id in category_ids
+            )
+        ]
+
+        self.build_index()
+
+        return original_count - len(self.annotations)
 
 
 
@@ -454,6 +513,20 @@ class DataSetMeta(BaseModel):
         return merged
 
     # --- dataset manipulation methods ---
+
+def remove_annotations_by_tag(
+    self,
+    split: str,
+    tags: set[str],
+    *,
+    remove_empty_images: bool = False,
+) -> int:
+    ds = getattr(self, f"{split}_COCO")
+    return ds.remove_annotations_by_tag(
+        tags,
+        remove_empty_images=remove_empty_images,
+    )
+
 
     def move_images_meta(
         self,

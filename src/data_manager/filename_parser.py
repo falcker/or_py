@@ -2,37 +2,91 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
+import re
+from typing import Optional
 
-filename = "DJI_20241230161023_0001_W_OR-107-96-744b0082fd9b4f7d8edbf8434d67fe5d-[TP6-TP-SE]"
-filename2 = "DJI_20241230161145_0008_W_OR-107-96-f74f6c0c2bd1439b8f9a3e9cf46a4d78-[541-RM1]"
-filename3 = "DJI_20241118204703_0001_W_TP6-TP-SE"
+from sympy import root
 
-@dataclass
-class FileName:
-    asset: str
-    component: str
-    date_time: datetime
-    guid: str
+from data_manager.models.datamodel import FileName
+
+def parse_filename(filename: str):
+    # ---- DATE/TIME EXTRACTION ----
+    dt = None
+    match = re.search(r'(\d{14}|\d{8}|\d{6})', filename)
+    if match:
+        raw = match.group(1)
+
+        if len(raw) == 14:  # YYYYMMDDHHMMSS
+            dt = datetime.strptime(raw, "%Y%m%d%H%M%S")
+        elif len(raw) == 8:  # YYYYMMDD
+            dt = datetime.strptime(raw, "%Y%m%d")
+        elif len(raw) == 6:  # YYMMDD → assume 20xx
+            dt = datetime.strptime("20" + raw, "%Y%m%d")
+
+    # ---- ASSET EXTRACTION ----
+    match = re.search(r'(F-?\d+|T\d+)', filename)
+    asset = match.group(1) if match else None
+
+    # ---- NORMALIZATION ----
+    if asset:
+        if asset.startswith('T'):
+            num = int(asset[1:])
+            asset = f'F{num:02d}'
+        elif asset.startswith('F-'):
+            num = int(asset[2:])
+            asset = asset.replace('F-', 'F')
+        else:
+            num = int(asset[1:])
+            asset = f'F{num:02d}'
 
 
-def parse_filename(filename : str):
-    split = filename.split('.')
-    if len(split) > 1:
-        filename = split[0]
-    filename=filename.replace('_','-')
-    splitted = filename.split('[')
-    if len(splitted)==1:
-        # old string
-        splitted3 = splitted[0].split('-')
-        date_time = datetime.strptime(splitted3[1],"%Y%m%d%H%M%S")
-        asset = splitted3[4]
-        component = '-'.join(splitted3[5:])
-        return FileName(asset,component,date_time,"")
+     # ---- GUID EXTRACTION ----
+    guid = None
 
-    splitted2 = splitted[-1].split('-')
-    asset = splitted2[0]
-    component = '-'.join(splitted2[1:])[0:-1]
-    splitted3 = splitted[0].split('-')
-    date_time = datetime.strptime(splitted3[1],"%Y%m%d%H%M%S")
-    guid = splitted3[-2]
-    return FileName(asset,component,date_time,guid)
+    # 1. Standard UUID
+    match = re.search(
+        r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b',
+        filename
+    )
+    if match:
+        guid = match.group(0)
+    else:
+        # 2. DJI-style ID (e.g., 0001_W)
+        match = re.search(r'_(\d{4}_[A-Z])_', filename)
+        if match:
+            guid = match.group(1)
+
+    # ---- COMPONENT EXTRACTION ----
+    component = None
+
+    # Common components you mentioned / likely patterns
+    component_patterns = [
+        r'Roof',
+        r'Tankpit',
+        r'Sump',
+        r'Leg',
+        r'Manhole',
+        r'SamplingPoint'
+    ]
+
+    for pattern in component_patterns:
+        match = re.search(pattern, filename, re.IGNORECASE)
+        if match:
+            component = match.group(0)
+            break
+
+    return FileName(
+        asset=asset,
+        component=component,
+        date_time=dt,
+        guid=guid
+    )
+
+root_dir = Path(r'C:\Falcker\cloud\falcker\AI\OlieDetectie\Willem_set\Alles')
+with open(root_dir / 'parsed_filenames.txt', 'w') as fw:
+    fw.write("filename, asset, component, date_time, guid\n")
+    for f in root_dir.glob('**/*.jp*'):
+        parsed = parse_filename(f.name)
+        # print(f"{f.name} -> {parsed.asset}, {parsed.date_time}")
+        fw.write(f"{f.name},{parsed.asset}, {parsed.component}, {parsed.date_time}, {parsed.guid}\n")
