@@ -12,12 +12,14 @@ from torch import ne
 from data_manager.filename_parser import parse_filename
 from data_manager.models.datamodel import FileName, DataFile
 
-def parse_root(root_dir: Path) -> list[DataFile]:
+def parse_root(root_dir: Path, include_subdirs: bool = True) -> list[DataFile]:
     image_data_files = []
     for img_path in root_dir.iterdir():
         if img_path.is_file() and img_path.suffix.lower() in [".jpg", ".jpeg", ".png"]:
             file_name = parse_filename(img_path.name)
             image_data_files.append(DataFile(img_path,file_name))
+        elif include_subdirs and img_path.is_dir():
+            image_data_files.extend(parse_root(img_path, include_subdirs=True))
     return image_data_files
 
 def write_data_files_to_csv(data_files: list[DataFile], output_file_path: Path|None=None):

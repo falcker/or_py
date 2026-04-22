@@ -83,10 +83,16 @@ def parse_filename(filename: str):
         guid=guid
     )
 
-root_dir = Path(r'C:\Falcker\cloud\falcker\AI\OlieDetectie\Willem_set\Alles')
-with open(root_dir / 'parsed_filenames.txt', 'w') as fw:
-    fw.write("filename, asset, component, date_time, guid\n")
-    for f in root_dir.glob('**/*.jp*'):
-        parsed = parse_filename(f.name)
-        # print(f"{f.name} -> {parsed.asset}, {parsed.date_time}")
-        fw.write(f"{f.name},{parsed.asset}, {parsed.component}, {parsed.date_time}, {parsed.guid}\n")
+if __name__ == "__main__":
+    pass
+    # Example usage
+    # filename = "F-01_Roof_20230915T143000.jpg"
+    # parsed = parse_filename(filename)
+    # print(parsed)
+    # # root_dir = Path(r'C:\Falcker\cloud\falcker\AI\OlieDetectie\Willem_set\Alles')
+    # with open(root_dir / 'parsed_filenames.txt', 'w') as fw:
+    #     fw.write("filename, asset, component, date_time, guid\n")
+    #     for f in root_dir.glob('**/*.jp*'):
+    #         parsed = parse_filename(f.name)
+    #         # print(f"{f.name} -> {parsed.asset}, {parsed.date_time}")
+    #         fw.write(f"{f.name},{parsed.asset}, {parsed.component}, {parsed.date_time}, {parsed.guid}\n")
