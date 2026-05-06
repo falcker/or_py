@@ -13,3 +13,4 @@ data
 
 *config.py
 src/config.py
+.env
