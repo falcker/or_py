@@ -10,6 +10,28 @@ from sympy import root
 
 from data_manager.models.datamodel import FileName
 
+def parse_operator_round_filename(cls, filename: str):
+    split = filename.split(".")
+    if len(split) > 1:
+        filename = split[0]
+    filename = filename.replace("_", "-")
+    splitted = filename.split("[")
+    if len(splitted) == 1:
+        # old string
+        splitted3 = splitted[0].split("-")
+        date_time = datetime.strptime(splitted3[1], "%Y%m%d%H%M%S")
+        asset = splitted3[4]
+        component = "-".join(splitted3[5:])
+        return FileName(asset, component, date_time, "")
+
+    splitted2 = splitted[-1].split("-")
+    asset = splitted2[0]
+    component = "-".join(splitted2[1:])[0:-1]
+    splitted3 = splitted[0].split("-")
+    date_time = datetime.strptime(splitted3[1], "%Y%m%d%H%M%S")
+    guid = splitted3[-2]
+    return cls(asset, component, date_time, guid)
+
 def parse_filename(filename: str):
     # ---- DATE/TIME EXTRACTION ----
     dt = None

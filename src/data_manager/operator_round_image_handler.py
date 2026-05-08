@@ -5,9 +5,11 @@ from pathlib import Path
 import shutil
 from typing import Callable
 
-from datamodel import PhotoInfo
-from filename_parser import parse_filename
+from data_manager.models.datamodel import PhotoInfo, FileName
+from data_manager.filename_parser import parse_operator_round_filename
 
+
+root = Path(r'C:\Falcker\cloud\falcker\AI\Operator Round TP6\Original')
 
 def select_images_over_stream(root : Path) -> None:
     images = root.glob('**/*.jpg')
@@ -37,7 +39,6 @@ def move_image(
     except shutil.Error:
         pass
 
-root = Path(r'D:\Falcker\AI\OperatorRounds\datasets\TP6')
 
 img_folders = list(root.iterdir())
 
@@ -47,7 +48,7 @@ def dir_to_image_infos(root_dir : Path):
         i=1
         for image in image_set.iterdir():
             if image.is_file() and image.suffix==".jpeg":
-                file_name = parse_filename(image.name)
+                file_name = parse_operator_round_filename(FileName, image.name)
                 image_infos.append(PhotoInfo(i, file_name,image))
                 i+=1
     return image_infos
@@ -59,7 +60,7 @@ def sort_image_infos_by_guid(img_infos: list[PhotoInfo]):
     return groups
 
 def create_image_info_dir_name(image_info: PhotoInfo, skip_id=False):
-    return f"{image_info.ID +"_" if not skip_id else ""}{image_info.filename.asset}_{image_info.filename.component}_{image_info.filename.guid}"
+    return f"{str(image_info.photostream_id) +'_' if not skip_id else ''}{image_info.filename.asset}_{image_info.filename.component}_{image_info.filename.guid}"
         
 def move_by_image_info(image_info : PhotoInfo, new_root=None):
     if not image_info.filename.guid:

@@ -110,6 +110,9 @@ def annotate_image(img_path: str, result: dict, output_path: str) -> str:
     draw = ImageDraw.Draw(img, "RGBA")
 
     x, y, w, h = bb["x"], bb["y"], bb["width"], bb["height"]
+    if x==0 and y==0 and w==0 and h==0:
+        print("⚠  No bounding box detected — skipping annotation.")
+        return ""
     lw = max(4, img.width // 400)
 
     draw.rectangle([x, y, x + w, y + h], fill=(255, 59, 48, 40))

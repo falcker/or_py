@@ -5,39 +5,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from PIL import Image
-
-
-# @dataclass
-# class FileName:
-#     asset: str
-#     component: str
-#     date_time: datetime
-#     guid: str
-
-#     @classmethod
-#     def from_filename(cls, filename: str):
-#         split = filename.split(".")
-#         if len(split) > 1:
-#             filename = split[0]
-#         filename = filename.replace("_", "-")
-#         splitted = filename.split("[")
-#         if len(splitted) == 1:
-#             # old string
-#             splitted3 = splitted[0].split("-")
-#             date_time = datetime.strptime(splitted3[1], "%Y%m%d%H%M%S")
-#             asset = splitted3[4]
-#             component = "-".join(splitted3[5:])
-#             return FileName(asset, component, date_time, "")
-
-#         splitted2 = splitted[-1].split("-")
-#         asset = splitted2[0]
-#         component = "-".join(splitted2[1:])[0:-1]
-#         splitted3 = splitted[0].split("-")
-#         date_time = datetime.strptime(splitted3[1], "%Y%m%d%H%M%S")
-#         guid = splitted3[-2]
-#         return cls(asset, component, date_time, guid)
-
+from PIL import Image, ImageFile
 
 @dataclass
 class FileName:
@@ -46,6 +14,7 @@ class FileName:
     date_time: Optional[datetime]
     guid: Optional[str]
 
+    
 @dataclass
 class DataFile:
     path: Path
@@ -57,19 +26,21 @@ class PhotoInfo:
     photostream_id: int
     filename: FileName
     file_path: Path
-    image: Image = field(init=False)
+    image: Optional[ImageFile.ImageFile] = None
 
     def __eq__(self, value):
         eq = False
         if self.filename.guid and value.filename.guid:
             eq = self.filename.guid == value.filename.guid
-        eq = self.filename.asset == value.filename.asset
-        eq = self.filename.component == value.filename.component
+        if self.filename.asset and value.filename.asset:
+            eq = self.filename.asset == value.filename.asset
+        if self.filename.component and value.filename.component:
+            eq = self.filename.component == value.filename.component
         return eq
 
     def __to_dict__(self):
         return {
-            "id": self.ID,
+            "id": self.photostream_id,
             "filename": self.file_path.name,
             "filepath": self.file_path,
             "root_dir_name": self.file_path.parent.name,
@@ -93,26 +64,9 @@ class Tag(Enum):
 class PhotoStream:
     photostream_id: int
     stream: list[PhotoInfo]
-    collection_round_tags: dict[int:Tag]
+    collection_round_tags: dict[int,Tag]
     asset: str
-    dir_path: Path = None
-
-    # @classmethod
-    # def from_dir(cls, root_dir: Path, photostream_id: int) -> PhotoStream:
-    #     images = []
-    #     # parse_photostream(root_dir.name)
-    #     for item in root_dir.iterdir():
-    #         if not item.is_file or not item.suffix == ".jpeg":
-    #             continue
-    #         images.append(
-    #             PhotoInfo(photostream_id, FileName.from_filename(item.name), item)
-    #         )
-
-    #     return PhotoStream(
-    #         photostream_id=photostream_id,
-    #         stream=images,
-    #         asset=
-    #         )
+    dir_path: Path|None = None
 
 
 @dataclass
