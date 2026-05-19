@@ -2,33 +2,23 @@
 """
 Visual Diff Detector — powered by Claude
 =========================================
-Detects visual differences between reference images and a current image, with optional
-few-shot examples of known anomaly types (water_pooling, rust, oil_stain, etc.).
+Detects visual differences between a target image and one or more reference
+and/or labeled-example images using the Anthropic API.
 
-Image roles:
-  --ref path           Normal reference image (repeatable). Shows the site in its
-                       expected state across lighting/weather variations.
-  --example path:type[:x,y,w,h]
-                       Few-shot anomaly example (repeatable). Type is required and
-                       becomes the anomaly_type label. Optional bounding box tells
-                       Claude exactly where the anomaly is in the example image.
-  current              Last positional argument. The image to inspect.
-
-Usage:
-    # Plain reference + current
-    python claude_change_detect.py --ref normal1.jpg --ref normal2.jpg current.jpg
-
-    # With anomaly examples (few-shot)
+Usage (new explicit mode):
     python claude_change_detect.py \\
-        --ref normal1.jpg --ref normal2.jpg \\
-        --example water_example.jpg:water_pooling:240,500,300,180 \\
-        --example rust_example.jpg:corrosion \\
-        --example oil_example.jpg:oil_stain:100,200,150,120 \\
-        current.jpg
+        --ref baseline_1.jpg --ref baseline_2.jpg \\
+        --example water_ref.png:water_pooling \\
+        target.jpg
 
-    # With API key and custom output
-    python claude_change_detect.py --ref ref.jpg current.jpg \\
-        --api-key sk-ant-... --output result.jpg
+Usage (legacy positional mode, kept for back-compat):
+    python claude_change_detect.py before.jpg after.jpg
+    python claude_change_detect.py before.jpg mid.jpg after.jpg
+
+Prompt control:
+    --prompt leak_focus            # built-in name (see prompts.BUILTIN_PROMPTS)
+    --prompt ./my_prompt.txt       # path to a text file
+    --prompt -                     # read prompt from stdin
 """
 
 import argparse
@@ -41,7 +31,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-from change_detection.prompts import COMPARISON_SYSTEM_PROMPT_LEAK_FOCUS_THREE_IMAGES_5_0
+from change_detection.prompts import BUILTIN_PROMPTS
 
 from dotenv import load_dotenv
 
@@ -52,8 +42,11 @@ if not api_key:
     print("Warning: ANTHROPIC_API_KEY not set. CLI mode will not work without it.")
 
 
+DEFAULT_PROMPT_NAME = "leak_focus"
+
+
 # ─────────────────────────────────────────────
-#  Helpers
+#  Image helpers
 # ─────────────────────────────────────────────
 
 def encode_image(path: str) -> tuple[str, str]:
@@ -70,242 +63,79 @@ def build_image_block(path: str) -> dict:
     return {"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}}
 
 
-def build_message_content(
-    ref_paths: list[str],
-    examples: list[dict],
-    current_path: str | None,
-    prompt: str,
-) -> list[dict]:
+# ─────────────────────────────────────────────
+#  Prompt assembly
+# ─────────────────────────────────────────────
+
+def load_prompt(source: str) -> str:
+    """Resolve a --prompt argument to the actual prompt text.
+
+    Accepts:
+      - "-"                         → read from stdin
+      - a path to an existing file  → read file contents
+      - a key in BUILTIN_PROMPTS    → use the registered prompt
     """
-    Build the full message content list (text + image blocks) sent to Claude.
-    Used by both call_claude (real run) and export_prompt (preview).
+    if source == "-":
+        return sys.stdin.read()
 
-    If current_path is None (preview/export mode), the current-image block is
-    represented as a placeholder so the structure is still visible.
+    p = Path(source)
+    if p.exists() and p.is_file():
+        return p.read_text(encoding="utf-8")
+
+    if source in BUILTIN_PROMPTS:
+        return BUILTIN_PROMPTS[source]
+
+    raise ValueError(
+        f"--prompt '{source}' is neither a file path nor a known prompt name. "
+        f"Known names: {', '.join(sorted(BUILTIN_PROMPTS))}"
+    )
+
+
+def build_layout_block(refs: list[str], examples: list[tuple[str, str]], target: str) -> str:
+    """Generate the 'Image inputs' description that precedes the user prompt.
+
+    This is the single source of truth for how each image position maps to its
+    role. The user-supplied prompt never has to describe ordering itself.
     """
-    content: list[dict] = []
+    lines = ["Image inputs (in order):"]
+    idx = 1
 
-    # 1. Normal references
-    if ref_paths:
-        content.append({
-            "type": "text",
-            "text": (
-                f"The following {len(ref_paths)} image(s) are NORMAL REFERENCE images "
-                f"showing the equipment in its expected state across natural variation "
-                f"(lighting, weather, wet/dry surfaces, seasonal changes)."
-            ),
-        })
-        for p in ref_paths:
-            content.append({"type": "image_placeholder", "path": p})
+    for _ in refs:
+        lines.append(f"  {idx}. REFERENCE — a baseline/normal-state image. No anomaly is present here.")
+        idx += 1
 
-    # 2. Anomaly examples (few-shot)
+    for _, label in examples:
+        lines.append(
+            f"  {idx}. EXAMPLE — illustrates the anomaly type '{label}'. "
+            f"Use it to calibrate what '{label}' looks like; do NOT report it as a change."
+        )
+        idx += 1
+
+    lines.append(f"  {idx}. TARGET — the image to inspect. Report changes in this image only.")
+
     if examples:
-        content.append({
-            "type": "text",
-            "text": (
-                f"The following {len(examples)} image(s) are FEW-SHOT EXAMPLES of "
-                f"confirmed anomalies at similar sites. Each is labeled with its "
-                f"anomaly_type. Use these to calibrate what each anomaly type looks "
-                f"like in practice — do NOT treat these as references for the current image."
-            ),
-        })
-        for ex in examples:
-            label = f"Anomaly example — type: {ex['type']}"
-            if ex["bbox"]:
-                bb = ex["bbox"]
-                label += (
-                    f". The anomaly is located at bounding box "
-                    f"x={bb['x']}, y={bb['y']}, width={bb['width']}, height={bb['height']}."
-                )
-            content.append({"type": "text", "text": label})
-            content.append({"type": "image_placeholder", "path": ex["path"]})
+        labels = sorted({label for _, label in examples})
+        lines.append("")
+        lines.append("Anomaly categories illustrated by the examples: " + ", ".join(labels) + ".")
 
-    # 3. Current image
-    content.append({
-        "type": "text",
-        "text": "The following image is the CURRENT IMAGE to inspect. This is your main focus.",
-    })
-    if current_path:
-        content.append({"type": "image_placeholder", "path": current_path})
-    else:
-        content.append({"type": "image_placeholder", "path": "<CURRENT_IMAGE>"})
-
-    # 4. Instruction prompt
-    content.append({"type": "text", "text": prompt})
-
-    return content
-
-
-def materialize_content(content: list[dict]) -> list[dict]:
-    """Convert image_placeholder entries to real base64 image blocks for the API."""
-    out = []
-    for block in content:
-        if block.get("type") == "image_placeholder":
-            out.append(build_image_block(block["path"]))
-        else:
-            out.append(block)
-    return out
-
-
-def render_content_as_text(content: list[dict]) -> str:
-    """Render the message content as a human-readable transcript."""
-    lines = []
-    lines.append("=" * 70)
-    lines.append("FULL MESSAGE SENT TO CLAUDE")
-    lines.append("=" * 70)
-    lines.append("")
-    for idx, block in enumerate(content, start=1):
-        if block.get("type") == "text":
-            lines.append(f"[Block {idx}] TEXT")
-            lines.append("-" * 70)
-            lines.append(block["text"])
-            lines.append("")
-        elif block.get("type") == "image_placeholder":
-            lines.append(f"[Block {idx}] IMAGE: {block['path']}")
-            lines.append("")
     return "\n".join(lines)
 
 
-def export_prompt(
-    prompt: str,
-    output_path: str | None = None,
-    ref_paths: list[str] | None = None,
-    examples: list[dict] | None = None,
-    current_path: str | None = None,
-) -> str:
-    """
-    Export the active prompt to a file (or stdout if output_path is None).
-
-    If ref_paths/examples are provided, exports the FULL message structure
-    (text blocks + image placeholders). Otherwise exports just the prompt text.
-
-    Returns the path written to, or an empty string for stdout-only.
-    """
-    if ref_paths or examples:
-        content = build_message_content(
-            ref_paths or [], examples or [], current_path, prompt
-        )
-        rendered = render_content_as_text(content)
-    else:
-        rendered = prompt
-
-    if output_path is None:
-        print(rendered)
-        return ""
-
-    out = Path(output_path)
-    out.write_text(rendered, encoding="utf-8")
-    return str(out)
-
-
-def parse_example_spec(spec: str) -> dict:
-    """
-    Parse an --example argument of the form  path:type[:x,y,w,h]
-    Returns: {"path": str, "type": str, "bbox": dict|None}
-
-    Handles Windows paths with drive letters (e.g. C:\\folder\\file.png:type:bbox)
-    by splitting from the RIGHT and reassembling the path.
-    """
-    # Split from the right: bbox (optional), type, then everything else is the path.
-    # Detect whether the trailing segment is a bbox (4 comma-separated ints) or a type.
-    parts = spec.rsplit(":", 2)
-
-    # Case A: 3 segments — could be path:type:bbox  OR  C:\path:type  (Windows, 2 logical)
-    # Case B: 2 segments — path:type  OR  C:\path (just a path, no type — invalid)
-    # We disambiguate by checking whether the final segment looks like a bbox.
-
-    def looks_like_bbox(s: str) -> bool:
-        coords = s.split(",")
-        if len(coords) != 4:
-            return False
-        try:
-            [int(c.strip()) for c in coords]
-            return True
-        except ValueError:
-            return False
-
-    if len(parts) == 3 and looks_like_bbox(parts[2]):
-        # path : type : bbox
-        path, anomaly_type, bbox_str = parts[0], parts[1], parts[2]
-    elif len(parts) >= 2:
-        # path : type     (no bbox; if 3 segments, the first two rejoin as the path)
-        # rsplit(":", 1) gives us the correct 2-way split for path:type
-        path, anomaly_type = spec.rsplit(":", 1)
-        bbox_str = None
-    else:
-        raise ValueError(
-            f"Invalid --example spec: '{spec}'. "
-            f"Expected format: path:type[:x,y,w,h]"
-        )
-
-    if not anomaly_type.strip():
-        raise ValueError(f"Missing anomaly type in '{spec}'.")
-
-    bbox = None
-    if bbox_str:
-        coords = bbox_str.split(",")
-        try:
-            x, y, w, h = (int(c.strip()) for c in coords)
-        except ValueError as e:
-            raise ValueError(f"Bbox coords must be integers in '{spec}'") from e
-        bbox = {"x": x, "y": y, "width": w, "height": h}
-
-    if not Path(path).exists():
-        raise FileNotFoundError(f"Example image not found: {path}")
-
-    return {"path": path, "type": anomaly_type, "bbox": bbox}
-
-
-def normalize_result(parsed) -> list[dict]:
-    """
-    Normalize Claude's response into a consistent list-of-anomalies format.
-    Handles all shapes our prompts might return:
-      - List of anomaly dicts (new schema)
-      - Single anomaly dict (old schema)
-      - Empty list (no anomalies found)
-    """
-    if isinstance(parsed, list):
-        return parsed
-    if isinstance(parsed, dict):
-        # Old single-anomaly format — wrap in list
-        if "bounding_box" in parsed or "description" in parsed:
-            return [parsed]
-        # Possibly wrapped: {"anomalies": [...]} or {"differences": [...]}
-        for key in ("anomalies", "differences", "results"):
-            if key in parsed and isinstance(parsed[key], list):
-                return parsed[key]
-    return []
+def assemble_prompt(base_prompt: str, refs: list[str], examples: list[tuple[str, str]], target: str) -> str:
+    layout = build_layout_block(refs, examples, target)
+    return f"{layout}\n\n{base_prompt.strip()}\n"
 
 
 # ─────────────────────────────────────────────
 #  Claude API
 # ─────────────────────────────────────────────
 
-def call_claude(
-    ref_paths: list[str],
-    examples: list[dict],
-    current_path: str,
-    api_key: str,
-    prompt: str,
-) -> tuple[list[dict], dict]:
-    """
-    Send references + few-shot anomaly examples + current image to Claude.
+def call_claude(image_paths: list[str], api_key: str, prompt: str) -> dict:
+    """Send images to Claude and return the parsed JSON result."""
+    if len(image_paths) < 2:
+        raise ValueError("At least two images are required (one reference/example + one target).")
 
-    Returns:
-        (anomalies, usage)
-        - anomalies: list of anomaly dicts parsed from Claude's response
-        - usage: dict with keys 'input_tokens', 'output_tokens',
-                 'cache_creation_input_tokens', 'cache_read_input_tokens',
-                 'total_tokens', 'model', 'stop_reason'
-    """
-    if not ref_paths:
-        raise ValueError("At least one --ref image is required.")
-    if not Path(current_path).exists():
-        raise FileNotFoundError(f"Current image not found: {current_path}")
-
-    content = materialize_content(
-        build_message_content(ref_paths, examples, current_path, prompt)
-    )
+    content = [build_image_block(p) for p in image_paths] + [{"type": "text", "text": prompt}]
 
     payload = {
         "model": "claude-opus-4-5",
@@ -362,19 +192,8 @@ def call_claude(
 #  Image annotation (Pillow)
 # ─────────────────────────────────────────────
 
-# Color palette for multiple anomalies (cycles if more than 6)
-ANOMALY_COLORS = [
-    (255, 59, 48),    # red
-    (255, 149, 0),    # orange
-    (255, 204, 0),    # yellow
-    (52, 199, 89),    # green
-    (0, 122, 255),    # blue
-    (175, 82, 222),   # purple
-]
-
-
-def annotate_image(img_path: str, anomalies: list[dict], output_path: str) -> str:
-    """Draw bounding boxes for all anomalies on the last image and save."""
+def annotate_image(img_path: str, result: dict, output_path: str) -> str:
+    """Draw bounding box on the target image and save to output_path."""
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
@@ -387,6 +206,11 @@ def annotate_image(img_path: str, anomalies: list[dict], output_path: str) -> st
 
     img = Image.open(img_path).convert("RGB")
     draw = ImageDraw.Draw(img, "RGBA")
+
+    x, y, w, h = bb["x"], bb["y"], bb["width"], bb["height"]
+    if x == 0 and y == 0 and w == 0 and h == 0:
+        print("⚠  No bounding box detected — skipping annotation.")
+        return ""
     lw = max(4, img.width // 400)
     font_size = max(14, img.width // 120)
 
@@ -584,67 +408,72 @@ def create_run_folder(
 #  CLI
 # ─────────────────────────────────────────────
 
+def parse_example(spec: str) -> tuple[str, str]:
+    """Parse a 'path:label' argument. Handles Windows drive letters (C:\\...)."""
+    sep = spec.rfind(":")
+    if sep == -1 or sep <= 1:
+        raise argparse.ArgumentTypeError(
+            f"--example must be PATH:LABEL (got '{spec}')"
+        )
+    path, label = spec[:sep], spec[sep + 1 :]
+    if not path or not label:
+        raise argparse.ArgumentTypeError(
+            f"--example must be PATH:LABEL with both parts non-empty (got '{spec}')"
+        )
+    return path, label
+
+
+def resolve_inputs(args) -> tuple[list[str], list[tuple[str, str]], str, list[str]]:
+    """Return (refs, examples, target, all_image_paths_in_send_order)."""
+    refs: list[str] = list(args.ref or [])
+    examples: list[tuple[str, str]] = list(args.example or [])
+
+    if refs or examples:
+        if len(args.images) != 1:
+            sys.exit(
+                "Error: when using --ref/--example, provide exactly one positional "
+                f"target image (got {len(args.images)})."
+            )
+        target = args.images[0]
+    else:
+        # Legacy mode: all positional, first N-1 are refs, last is target.
+        if len(args.images) < 2:
+            sys.exit("Error: provide at least two images, or use --ref/--example with a target.")
+        refs = args.images[:-1]
+        target = args.images[-1]
+
+    all_paths = refs + [p for p, _ in examples] + [target]
+    missing = [p for p in all_paths if not Path(p).exists()]
+    if missing:
+        sys.exit("Error: file(s) not found:\n  " + "\n  ".join(missing))
+
+    return refs, examples, target, all_paths
+
+
 def run_cli(args):
     key = args.api_key or os.environ.get("ANTHROPIC_API_KEY", "")
     if not key:
-        print("Error: provide --api-key or set ANTHROPIC_API_KEY.")
-        sys.exit(1)
+        sys.exit("Error: provide --api-key or set ANTHROPIC_API_KEY.")
 
-    # Validate references
-    if not args.ref:
-        print("Error: at least one --ref image is required.")
-        sys.exit(1)
-    missing_refs = [p for p in args.ref if not Path(p).exists()]
-    if missing_refs:
-        print(f"Error: reference file(s) not found: {', '.join(missing_refs)}")
-        sys.exit(1)
+    refs, examples, target, all_paths = resolve_inputs(args)
 
-    # Validate current image
-    if not args.current:
-        print("Error: current image (last positional argument) is required.")
-        sys.exit(1)
-    if not Path(args.current).exists():
-        print(f"Error: current image not found: {args.current}")
-        sys.exit(1)
+    base_prompt = load_prompt(args.prompt)
+    final_prompt = assemble_prompt(base_prompt, refs, examples, target)
 
-    # Parse example specs
-    examples = []
-    for spec in (args.example or []):
-        try:
-            examples.append(parse_example_spec(spec))
-        except (ValueError, FileNotFoundError) as e:
-            print(f"Error parsing --example: {e}")
-            sys.exit(1)
+    if args.show_prompt:
+        print("── Final prompt ────────────────────────")
+        print(final_prompt)
+        print("────────────────────────────────────────\n")
 
-    print(f"🔍  Sending to Claude:")
-    print(f"    Normal refs : {len(args.ref)}  ({', '.join(args.ref)})")
-    if examples:
-        ex_summary = ", ".join(
-            f"{ex['type']}{'+bbox' if ex['bbox'] else ''}" for ex in examples
-        )
-        print(f"    Examples    : {len(examples)} ({ex_summary})")
-    else:
-        print(f"    Examples    : 0")
-    print(f"    Current     : {args.current}")
+    if args.dry_run:
+        print(f"Dry run — would send {len(all_paths)} image(s):")
+        for i, p in enumerate(all_paths, 1):
+            print(f"  {i}. {p}")
+        return
 
-    anomalies, usage = call_claude(
-        ref_paths=args.ref,
-        examples=examples,
-        current_path=args.current,
-        api_key=key,
-        prompt=COMPARISON_SYSTEM_PROMPT_LEAK_FOCUS_THREE_IMAGES_5_0,
-    )
-
-    print("\n── Token Usage ─────────────────────────")
-    print(f"    Model              : {usage['model']}")
-    print(f"    Stop reason        : {usage['stop_reason']}")
-    print(f"    Input tokens       : {usage['input_tokens']:,}")
-    print(f"    Output tokens      : {usage['output_tokens']:,}")
-    if usage["cache_creation_input_tokens"]:
-        print(f"    Cache creation     : {usage['cache_creation_input_tokens']:,}")
-    if usage["cache_read_input_tokens"]:
-        print(f"    Cache read         : {usage['cache_read_input_tokens']:,}")
-    print(f"    TOTAL              : {usage['total_tokens']:,}")
+    print(f"🔍  Sending {len(all_paths)} image(s) to Claude "
+          f"({len(refs)} ref, {len(examples)} example, 1 target)...")
+    result = call_claude(all_paths, key, final_prompt)
 
     print("\n── Result ──────────────────────────────")
     if not anomalies:
@@ -668,11 +497,10 @@ def run_cli(args):
     # Save full result as JSON (including token usage)
     json_path = str(Path(args.output).with_suffix(".json"))
     with open(json_path, "w") as f:
-        json.dump({"anomalies": anomalies, "usage": usage}, f, indent=2)
-    print(f"✅  JSON saved  : {json_path}")
+        json.dump({"bounding_box": bb, "description": result.get("description")}, f, indent=2)
+    print(f"\n✅  JSON saved  : {json_path}")
 
-    # Annotate the current image
-    out_img = annotate_image(args.current, anomalies, args.output)
+    out_img = annotate_image(target, result, args.output)
     if out_img:
         print(f"🖼   Image saved : {out_img}")
 
@@ -699,106 +527,31 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument(
-        "--ref", "-r", action="append", default=[],
-        help="Normal reference image (repeatable). Pass at least one.",
-    )
-    parser.add_argument(
-        "--example", "-e", action="append", default=[],
-        help="Few-shot anomaly example. Format: path:type[:x,y,w,h]  (repeatable). "
-             "Type examples: water_pooling, oil_stain, corrosion, leak, discoloration.",
-    )
-    parser.add_argument(
-        "current", nargs="?",
-        help="The current image to inspect (positional, last argument).",
-    )
+    parser.add_argument("images", nargs="*",
+                        help="Target image (when using --ref/--example) "
+                             "or legacy ordered list of images (before...after).")
+    parser.add_argument("--ref", action="append", metavar="PATH",
+                        help="Reference/baseline image. Repeat for multiple.")
+    parser.add_argument("--example", action="append", type=parse_example, metavar="PATH:LABEL",
+                        help="Labeled example of an anomaly (e.g. 'water_ref.png:water_pooling'). Repeat for multiple.")
+    parser.add_argument("--prompt", default=DEFAULT_PROMPT_NAME,
+                        help=f"Prompt source: built-in name ({', '.join(sorted(BUILTIN_PROMPTS))}), "
+                             f"file path, or '-' for stdin. Default: {DEFAULT_PROMPT_NAME}.")
+    parser.add_argument("--show-prompt", action="store_true",
+                        help="Print the fully assembled prompt before sending.")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Resolve inputs and prompt, but do not call the API.")
     parser.add_argument("--api-key", "-k", help="Anthropic API key (or set ANTHROPIC_API_KEY)")
     parser.add_argument("--output", "-o", default="annotated_diff.jpg",
-                        help="Output image path (default: annotated_diff.jpg)")
-    parser.add_argument(
-        "--runs-dir", default="runs",
-        help="Directory where per-run folders are created (default: runs).",
-    )
-    parser.add_argument(
-        "--label", "-l", default=None,
-        help="Optional short label appended to the run folder name (e.g. 'fewshot_v1').",
-    )
-    parser.add_argument(
-        "--no-log", action="store_true",
-        help="Disable run logging entirely. By default, every run creates a folder under --runs-dir.",
-    )
-    parser.add_argument(
-        "--no-copy-inputs", action="store_true",
-        help="Skip copying input images into the run folder (just record paths).",
-    )
-    parser.add_argument(
-        "--export-prompt", metavar="PATH",
-        help="Write the active prompt to PATH and exit (no API call).",
-    )
-    parser.add_argument(
-        "--show-prompt", action="store_true",
-        help="Print the active prompt to stdout and exit (no API call).",
-    )
+                        help="Output annotated image path (default: annotated_diff.jpg)")
     args = parser.parse_args()
 
-    # Short-circuit: export/show prompt without making any API call
-    if args.show_prompt or args.export_prompt:
-        # Parse refs and examples (if provided) so the export shows the full structure.
-        # We do NOT require current image here, and we don't require files to exist
-        # if no refs/examples were passed.
-        parsed_examples = []
-        for spec in (args.example or []):
-            try:
-                # Reuse parser but skip the existence check by catching it
-                parsed_examples.append(parse_example_spec(spec))
-            except FileNotFoundError:
-                # Allow missing files when only previewing the prompt
-                # Parse manually without existence check
-                if spec.rsplit(":", 2)[-1].count(",") == 3:
-                    path, atype, bbox_str = spec.rsplit(":", 2)
-                    coords = [int(c) for c in bbox_str.split(",")]
-                    parsed_examples.append({
-                        "path": path, "type": atype,
-                        "bbox": {"x": coords[0], "y": coords[1], "width": coords[2], "height": coords[3]},
-                    })
-                else:
-                    path, atype = spec.rsplit(":", 1)
-                    parsed_examples.append({"path": path, "type": atype, "bbox": None})
-            except ValueError as e:
-                print(f"Error parsing --example: {e}")
-                sys.exit(1)
-
-        if args.show_prompt:
-            export_prompt(
-                COMPARISON_SYSTEM_PROMPT_LEAK_FOCUS_THREE_IMAGES_5_0,
-                ref_paths=args.ref or None,
-                examples=parsed_examples or None,
-                current_path=args.current,
-            )
-            return
-        if args.export_prompt:
-            path = export_prompt(
-                COMPARISON_SYSTEM_PROMPT_LEAK_FOCUS_THREE_IMAGES_5_0,
-                output_path=args.export_prompt,
-                ref_paths=args.ref or None,
-                examples=parsed_examples or None,
-                current_path=args.current,
-            )
-            print(f"✅  Prompt exported to: {path}")
-            return
-
-    if args.ref and args.current:
-        run_cli(args)
-    else:
+    has_inputs = args.ref or args.example or len(args.images) >= 2
+    if not has_inputs:
         parser.print_help()
-        print("\nQuick start:")
-        print("  Basic           : python claude_change_detect.py --ref normal.jpg current.jpg")
-        print("  Multi-reference : python claude_change_detect.py --ref n1.jpg --ref n2.jpg current.jpg")
-        print("  With examples   : python claude_change_detect.py \\")
-        print("                      --ref n1.jpg --ref n2.jpg \\")
-        print("                      --example water.jpg:water_pooling:240,500,300,180 \\")
-        print("                      --example rust.jpg:corrosion \\")
-        print("                      current.jpg")
+        return
+
+    run_cli(args)
 
 
 if __name__ == "__main__":
