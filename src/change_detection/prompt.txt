@@ -1,0 +1,71 @@
+======================================================================
+FULL MESSAGE SENT TO CLAUDE
+======================================================================
+
+[Block 1] TEXT
+----------------------------------------------------------------------
+The following 2 image(s) are NORMAL REFERENCE images showing the equipment in its expected state across natural variation (lighting, weather, wet/dry surfaces, seasonal changes).
+
+[Block 2] IMAGE: C:\Falcker\cloud\falcker\AI\Operator Round TP6\testsets\stream_test_set_04_water_test\1.jpg
+
+[Block 3] IMAGE: C:\Falcker\cloud\falcker\AI\Operator Round TP6\testsets\stream_test_set_04_water_test\2.jpg
+
+[Block 4] TEXT
+----------------------------------------------------------------------
+The following 1 image(s) are FEW-SHOT EXAMPLES of confirmed anomalies at similar sites. Each is labeled with its anomaly_type. Use these to calibrate what each anomaly type looks like in practice — do NOT treat these as references for the current image.
+
+[Block 5] TEXT
+----------------------------------------------------------------------
+Anomaly example — type: water_pooling
+
+[Block 6] IMAGE: C:\Falcker\cloud\falcker\AI\Operator Round TP6\testsets\references\water_ref_02.png
+
+[Block 7] TEXT
+----------------------------------------------------------------------
+The following image is the CURRENT IMAGE to inspect. This is your main focus.
+
+[Block 8] IMAGE: C:\Falcker\cloud\falcker\AI\Operator Round TP6\testsets\stream_test_set_04_water_test\3.jpg
+
+[Block 9] TEXT
+----------------------------------------------------------------------
+
+You are a visual inspection AI for industrial equipment.
+
+The first N-1 images are REFERENCE images showing normal conditions.
+The LAST image is the CURRENT image to inspect.
+
+Flag anything in the CURRENT image that looks worse than the references.
+A false positive is always preferable to a missed detection.
+
+WHAT TO FLAG (meaningful anomalies):
+- LEAKS: wet patches, drips, streaks, or active flow not present in references.
+  Look especially at pipe joints, valve stems, flanges, and weld seams.
+- OIL/CHEMICAL STAINS: dark or iridescent patches below mixers, nozzles, manholes,
+  valves, flanges, or pipe joints. Note rainbow sheen as a strong oil indicator.
+- WATER POOLING — detection strategy:
+  Check low points, brick/concrete depressions, and areas around drain covers.
+  Standing water in tank pit areas is especially critical.
+  Even without a clear reflection, flag pooling when TWO OR MORE of these
+  indirect signals co-occur in the same area:
+    * Uniform dark saturation of porous material (brick, concrete, gravel)
+    * Accelerated moss/algae growth concentrated in one zone
+    * Rust streaks or mineral deposits below the suspect area
+    * Surface texture consistent with a water meniscus at edges
+    * Shadow pattern inconsistent with the light direction in the image
+- CORROSION: new rust streaks, surface pitting, flaking paint, or oxide deposits
+  on metal components not visible in references.
+- STRUCTURAL: cracks, spalling, subsidence, or displaced components.
+
+Return ONLY a JSON array. No markdown, no explanation.
+If nothing is detected, return [].
+
+[
+  {
+    "description": "what you see and why it differs from references",
+    "anomaly_type": "leak | oil_stain | water_pooling | corrosion | structural",
+    "bounding_box": {"x": 0, "y": 0, "width": 0, "height": 0},
+    "severity": "low | medium | high",
+    "confidence": 0.0
+  }
+]
+
