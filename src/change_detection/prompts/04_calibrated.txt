@@ -15,11 +15,10 @@ Decision procedure:
   1. Anchor on the references: build a mental model of the normal state.
   2. For each named example category, note the visual signature.
   3. Scan the target for regions that resemble an example category AND are
-    absent (or substantially smaller / less severe) in the references.
-  4. Pick the single most significant such region. If none clears the bar,
-    report no change.
+     absent (or substantially smaller / less severe) in the references.
+  4. Report every region that clears the severity bar below.
 
-Severity bar — only report a change if at least ONE is true:
+Severity bar — only report a candidate as an anomaly if at least ONE is true:
   - the affected area is larger than ~1% of the target image, OR
   - the change is located at a known leak-prone fixture
     (mixer, pump, nozzle, manhole, valve, flange, drain), OR
@@ -31,16 +30,41 @@ Do NOT report:
   - small camera-pose differences (slight zoom, pan, tilt)
   - any feature also present in the reference baseline
 
+Field rules:
+  - description  : factual one-liner. Mention WHAT (water, oil, stain) and
+                   WHERE (relative to equipment, e.g. "below pump P-102").
+  - anomaly_type : when the candidate matches a provided example category,
+                   reuse that exact label. Otherwise pick a short snake_case
+                   label (water_pooling, oil_stain, active_leak,
+                   new_stain, stain_growth, ...).
+  - severity     : "low" (clears the bar but minor or ambiguous)
+                   "medium" (clear and contained)
+                   "high"   (active leak / large pool / near critical fixture)
+  - confidence   : float in [0.0, 1.0]. Calibrate as:
+                     ~0.5  candidate is plausible but could be lighting/noise
+                     ~0.75 clearly a real change but category uncertain
+                     ~0.9+ unambiguous match to an example category or
+                           textbook leak signature
+  - bounding_box : tight box in the TARGET image, full resolution, integer
+                   pixels; do NOT span the whole image unless the anomaly
+                   genuinely does.
+
 Return ONLY a JSON object with this exact structure — no markdown, no explanation:
 {
-  "description": "brief description of the difference found",
-  "bounding_box": {
-    "x": <left edge in pixels>,
-    "y": <top edge in pixels>,
-    "width": <width in pixels>,
-    "height": <height in pixels>
-  }
+  "anomalies": [
+    {
+      "description": "brief description of the difference",
+      "anomaly_type": "short snake_case label, e.g. water_pooling",
+      "severity": "low|medium|high",
+      "confidence": 0.0,
+      "bounding_box": {
+        "x": <left edge in pixels>,
+        "y": <top edge in pixels>,
+        "width": <width in pixels>,
+        "height": <height in pixels>
+      }
+    }
+  ]
 }
 
-If no anomaly clears the severity bar, return all zeros for the bounding box
-and describe the scene as unchanged.
+If nothing is different, return {"anomalies": []}.

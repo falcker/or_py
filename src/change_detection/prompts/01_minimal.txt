@@ -2,13 +2,20 @@ Find any visible difference in the target image compared to the reference(s).
 
 Return ONLY a JSON object with this exact structure — no markdown, no explanation:
 {
-  "description": "brief description of the difference found",
-  "bounding_box": {
-    "x": <left edge in pixels>,
-    "y": <top edge in pixels>,
-    "width": <width in pixels>,
-    "height": <height in pixels>
-  }
+  "anomalies": [
+    {
+      "description": "brief description of the difference",
+      "anomaly_type": "short snake_case label, e.g. water_pooling",
+      "severity": "low|medium|high",
+      "confidence": 0.0,
+      "bounding_box": {
+        "x": <left edge in pixels>,
+        "y": <top edge in pixels>,
+        "width": <width in pixels>,
+        "height": <height in pixels>
+      }
+    }
+  ]
 }
 
-If nothing is different, return all zeros for the bounding box.
+If nothing is different, return {"anomalies": []}.

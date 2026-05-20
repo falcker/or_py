@@ -16,16 +16,36 @@ Do NOT report:
   - cosmetic dirt, dust, or wear that is also visible in the reference(s)
   - reflections, glare, or wet-looking surfaces that match the reference baseline
 
+Add one entry to "anomalies" for each distinct anomaly you find. If no
+meaningful anomaly is present, return {"anomalies": []}.
+
+Use these fields per anomaly:
+  - description   : one sentence, factual, what + where (e.g. fixture)
+  - anomaly_type  : short snake_case label
+                    (water_pooling, oil_stain, active_leak, new_stain, stain_growth, ...)
+  - severity      : "low" (minor/localized) | "medium" (clear, contained)
+                    | "high" (active leak, large pool, near critical fixture)
+  - confidence    : float in [0.0, 1.0] reflecting certainty the change is real
+                    and not a noise/lighting artifact
+  - bounding_box  : tight box around the anomaly in the target image, in
+                    pixels at the target's full resolution
+
 Return ONLY a JSON object with this exact structure — no markdown, no explanation:
 {
-  "description": "brief description of the difference found",
-  "bounding_box": {
-    "x": <left edge in pixels>,
-    "y": <top edge in pixels>,
-    "width": <width in pixels>,
-    "height": <height in pixels>
-  }
+  "anomalies": [
+    {
+      "description": "brief description of the difference",
+      "anomaly_type": "short snake_case label, e.g. water_pooling",
+      "severity": "low|medium|high",
+      "confidence": 0.0,
+      "bounding_box": {
+        "x": <left edge in pixels>,
+        "y": <top edge in pixels>,
+        "width": <width in pixels>,
+        "height": <height in pixels>
+      }
+    }
+  ]
 }
 
-If no meaningful anomaly is present in the target, return all zeros for the
-bounding box and describe the scene as unchanged.
+If nothing is different, return {"anomalies": []}.
