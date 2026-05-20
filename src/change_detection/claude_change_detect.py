@@ -63,6 +63,71 @@ def build_image_block(path: str) -> dict:
     return {"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}}
 
 
+ANOMALY_COLORS = [
+    (255, 59, 48), (52, 199, 89), (0, 122, 255), (255, 149, 0),
+    (175, 82, 222), (255, 45, 85), (88, 86, 214), (90, 200, 250),
+]
+
+
+def build_message_content(refs: list[str], examples: list[dict], current: str, prompt: str) -> list[dict]:
+    """Build the message content list (images + text) that goes to the API.
+
+    `examples` is a list of dicts: {"path": str, "type": str, "bbox": Any}.
+    The image order matches build_layout_block: refs, then examples, then current.
+    """
+    content: list[dict] = []
+    for p in refs:
+        content.append(build_image_block(p))
+    for ex in examples:
+        content.append(build_image_block(ex["path"]))
+    content.append(build_image_block(current))
+    content.append({"type": "text", "text": prompt})
+    return content
+
+
+def render_content_as_text(content: list[dict]) -> str:
+    """Render a message-content list into a flat text dump for logging.
+
+    Image blocks are reduced to placeholders so the log stays human-readable
+    and small (we don't dump base64).
+    """
+    lines: list[str] = []
+    img_idx = 0
+    for block in content:
+        if block.get("type") == "image":
+            img_idx += 1
+            mime = block.get("source", {}).get("media_type", "image/?")
+            lines.append(f"[IMAGE #{img_idx} ({mime})]")
+        elif block.get("type") == "text":
+            lines.append("")
+            lines.append(block.get("text", ""))
+        else:
+            lines.append(f"[UNKNOWN BLOCK: {block.get('type')}]")
+    return "\n".join(lines)
+
+
+def normalize_result(parsed) -> dict:
+    """Coerce the model's parsed JSON into {'anomalies': [...]} shape.
+
+    Accepts both the new multi-anomaly schema and the legacy single-bounding-box
+    schema, so prompts of either generation still work.
+    """
+    if isinstance(parsed, list):
+        return {"anomalies": parsed}
+    if isinstance(parsed, dict):
+        if isinstance(parsed.get("anomalies"), list):
+            return {"anomalies": parsed["anomalies"]}
+        if "bounding_box" in parsed:
+            bb = parsed.get("bounding_box", {}) or {}
+            if all(bb.get(k, 0) == 0 for k in ("x", "y", "width", "height")):
+                return {"anomalies": []}
+            return {"anomalies": [{
+                "description": parsed.get("description", ""),
+                "bounding_box": bb,
+            }]}
+    return {"anomalies": []}
+
+
 # ─────────────────────────────────────────────
 #  Prompt assembly
 # ─────────────────────────────────────────────
@@ -192,8 +257,8 @@ def call_claude(image_paths: list[str], api_key: str, prompt: str) -> dict:
 #  Image annotation (Pillow)
 # ─────────────────────────────────────────────
 
-def annotate_image(img_path: str, result: dict, output_path: str) -> str:
-    """Draw bounding box on the target image and save to output_path."""
+def annotate_image(img_path: str, anomalies: list[dict], output_path: str) -> str:
+    """Draw a bounding box per anomaly on the target image and save to output_path."""
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
@@ -207,10 +272,6 @@ def annotate_image(img_path: str, result: dict, output_path: str) -> str:
     img = Image.open(img_path).convert("RGB")
     draw = ImageDraw.Draw(img, "RGBA")
 
-    x, y, w, h = bb["x"], bb["y"], bb["width"], bb["height"]
-    if x == 0 and y == 0 and w == 0 and h == 0:
-        print("⚠  No bounding box detected — skipping annotation.")
-        return ""
     lw = max(4, img.width // 400)
     font_size = max(14, img.width // 120)
 
@@ -473,7 +534,8 @@ def run_cli(args):
 
     print(f"🔍  Sending {len(all_paths)} image(s) to Claude "
           f"({len(refs)} ref, {len(examples)} example, 1 target)...")
-    result = call_claude(all_paths, key, final_prompt)
+    result, usage = call_claude(all_paths, key, final_prompt)
+    anomalies = result.get("anomalies", [])
 
     print("\n── Result ──────────────────────────────")
     if not anomalies:
@@ -489,7 +551,7 @@ def run_cli(args):
             conf = anomaly.get("confidence")
             if isinstance(conf, (int, float)):
                 print(f"      Confidence: {conf:.0%}")
-            bb = anomaly.get("bounding_box", {})
+            bb = anomaly.get("bounding_box", {}) or {}
             print(f"      Box       : x={bb.get('x')} y={bb.get('y')} "
                   f"w={bb.get('width')} h={bb.get('height')}")
             print()
@@ -497,22 +559,26 @@ def run_cli(args):
     # Save full result as JSON (including token usage)
     json_path = str(Path(args.output).with_suffix(".json"))
     with open(json_path, "w") as f:
-        json.dump({"bounding_box": bb, "description": result.get("description")}, f, indent=2)
+        json.dump({"anomalies": anomalies, "usage": usage}, f, indent=2)
     print(f"\n✅  JSON saved  : {json_path}")
 
-    out_img = annotate_image(target, result, args.output)
+    out_img = annotate_image(target, anomalies, args.output)
     if out_img:
         print(f"🖼   Image saved : {out_img}")
 
     # Log the run (unless --no-log was passed)
     if not args.no_log:
+        examples_for_log = [
+            {"path": p, "type": label, "bbox": None}
+            for p, label in examples
+        ]
         run_dir = create_run_folder(
             runs_dir=args.runs_dir,
             label=args.label,
-            ref_paths=args.ref,
-            examples=examples,
-            current_path=args.current,
-            prompt=COMPARISON_SYSTEM_PROMPT_LEAK_FOCUS_THREE_IMAGES_5_0,
+            ref_paths=refs,
+            examples=examples_for_log,
+            current_path=target,
+            prompt=final_prompt,
             anomalies=anomalies,
             usage=usage,
             annotated_image_path=out_img or None,
@@ -544,6 +610,14 @@ def main():
     parser.add_argument("--api-key", "-k", help="Anthropic API key (or set ANTHROPIC_API_KEY)")
     parser.add_argument("--output", "-o", default="annotated_diff.jpg",
                         help="Output annotated image path (default: annotated_diff.jpg)")
+    parser.add_argument("--runs-dir", default="runs",
+                        help="Directory for per-run logs (default: runs)")
+    parser.add_argument("--label", default=None,
+                        help="Optional label appended to the run folder name")
+    parser.add_argument("--no-log", action="store_true",
+                        help="Do not write a per-run log folder.")
+    parser.add_argument("--no-copy-inputs", action="store_true",
+                        help="Do not copy input images into the run folder.")
     args = parser.parse_args()
 
     has_inputs = args.ref or args.example or len(args.images) >= 2
