@@ -16,7 +16,8 @@ Severity guidance:
   - "high"   — clear change with likely operational impact
 
 Confidence is a float in [0.0, 1.0] reflecting how certain you are the
-change is real (not a noise artifact).
+change is real (not a noise artifact). Also come up with one sentence explaining the main source of uncertainty.
+
 
 Return ONLY a JSON object with this exact structure — no markdown, no explanation:
 {
@@ -26,6 +27,7 @@ Return ONLY a JSON object with this exact structure — no markdown, no explanat
       "anomaly_type": "short snake_case label, e.g. water_pooling",
       "severity": "low|medium|high",
       "confidence": 0.0,
+      "uncertainty": "one sentence on the main source of uncertainty",
       "bounding_box": {
         "x": <left edge in pixels>,
         "y": <top edge in pixels>,

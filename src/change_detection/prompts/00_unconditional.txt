@@ -1,0 +1,36 @@
+Look at the TARGET image only. Ignore every other image — do NOT compare to
+the references or examples. Treat the target as a standalone photo.
+
+Report every region in the target that shows water, oil, fluid pooling, wet
+patches, or staining on floors, surfaces, or equipment — regardless of
+whether anything similar appears in the other images.
+
+Field rules:
+  - description  : factual one-liner. What it looks like + where on the scene.
+  - anomaly_type : short snake_case label (water_pooling, wet_patch, oil_stain,
+                   stain, fluid_trail, ...).
+  - severity     : "low" | "medium" | "high"
+  - confidence   : float in [0.0, 1.0]
+  - uncertainty  : one sentence naming the main source of uncertainty for this
+                   detection (e.g. "could be shadow", "edge is ambiguous",
+                   "unclear if it matches the example category"). Required.
+  - bounding_box : tight box in the TARGET image at full resolution.
+
+Return ONLY a JSON object with this exact structure — no markdown, no explanation:
+{
+  "anomalies": [
+    {
+      "description": "...",
+      "anomaly_type": "...",
+      "severity": "low|medium|high",
+      "confidence": 0.0,
+      "uncertainty": "one sentence on the main source of uncertainty",
+      "bounding_box": {
+        "x": <int>, "y": <int>, "width": <int>, "height": <int>
+      }
+    }
+  ]
+}
+
+If you genuinely see no water, oil, or staining anywhere in the target,
+return {"anomalies": []}.

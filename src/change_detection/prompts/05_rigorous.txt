@@ -47,7 +47,7 @@ in your final output):
     this to lighting or pose alone?" If yes, drop it.
 
   Step 7 — Confidence calibration.
-    For each remaining candidate, assign a confidence in [0.0, 1.0]:
+    For each remaining candidate, assign a confidence in [0.0, 1.0] and come up with one sentence explaining the main source of uncertainty:
       0.50–0.65 : plausible but borderline (just barely passed Step 6)
       0.66–0.84 : clearly a real change, category may be uncertain
       0.85–1.00 : unambiguous match to an example or textbook leak signature
@@ -75,6 +75,7 @@ Return ONLY a JSON object with this exact structure — no markdown, no explanat
       "anomaly_type": "short snake_case label, e.g. water_pooling",
       "severity": "low|medium|high",
       "confidence": 0.0,
+      "uncertainty": "one sentence on the main source of uncertainty",
       "bounding_box": {
         "x": <left edge in pixels>,
         "y": <top edge in pixels>,

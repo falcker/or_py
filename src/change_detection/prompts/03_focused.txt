@@ -26,7 +26,8 @@ Use these fields per anomaly:
   - severity      : "low" (minor/localized) | "medium" (clear, contained)
                     | "high" (active leak, large pool, near critical fixture)
   - confidence    : float in [0.0, 1.0] reflecting certainty the change is real
-                    and not a noise/lighting artifact
+                    and not a noise/lighting artifact. Also come up with one sentence explaining the main source of uncertainty.
+
   - bounding_box  : tight box around the anomaly in the target image, in
                     pixels at the target's full resolution
 
@@ -38,6 +39,7 @@ Return ONLY a JSON object with this exact structure — no markdown, no explanat
       "anomaly_type": "short snake_case label, e.g. water_pooling",
       "severity": "low|medium|high",
       "confidence": 0.0,
+      "uncertainty": "one sentence on the main source of uncertainty",
       "bounding_box": {
         "x": <left edge in pixels>,
         "y": <top edge in pixels>,

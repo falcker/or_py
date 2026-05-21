@@ -8,6 +8,7 @@ Return ONLY a JSON object with this exact structure — no markdown, no explanat
       "anomaly_type": "short snake_case label, e.g. water_pooling",
       "severity": "low|medium|high",
       "confidence": 0.0,
+      "uncertainty": "one sentence on the main source of uncertainty",
       "bounding_box": {
         "x": <left edge in pixels>,
         "y": <top edge in pixels>,

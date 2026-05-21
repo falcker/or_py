@@ -352,6 +352,7 @@ def create_run_folder(
     usage: dict,
     annotated_image_path: str | None,
     copy_inputs: bool = True,
+    folder_name: str | None = None,
 ) -> str:
     """
     Create a timestamped run folder and save all artifacts.
@@ -362,9 +363,12 @@ def create_run_folder(
     import hashlib
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    folder_name = timestamp
-    if label:
-        folder_name += f"_{_safe_filename(label)}"
+    if folder_name is None:
+        folder_name = timestamp
+        if label:
+            folder_name += f"_{_safe_filename(label)}"
+    else:
+        folder_name = _safe_filename(folder_name)
 
     run_dir = Path(runs_dir) / folder_name
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -416,9 +420,11 @@ def create_run_folder(
         saved_current = str(dest_cur.relative_to(run_dir))
 
     if annotated_image_path and Path(annotated_image_path).exists():
-        dest = run_dir / f"annotated{Path(annotated_image_path).suffix}"
-        shutil.copy2(annotated_image_path, dest)
-        saved_annotated = str(dest.relative_to(run_dir))
+        src_ann = Path(annotated_image_path).resolve()
+        dest = (run_dir / f"annotated{src_ann.suffix}").resolve()
+        if src_ann != dest:
+            shutil.copy2(src_ann, dest)
+        saved_annotated = str(dest.relative_to(run_dir.resolve()))
 
     # 5. Build the manifest
     prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12]
@@ -610,8 +616,8 @@ def main():
     parser.add_argument("--api-key", "-k", help="Anthropic API key (or set ANTHROPIC_API_KEY)")
     parser.add_argument("--output", "-o", default="annotated_diff.jpg",
                         help="Output annotated image path (default: annotated_diff.jpg)")
-    parser.add_argument("--runs-dir", default="runs",
-                        help="Directory for per-run logs (default: runs)")
+    parser.add_argument("--runs-dir", default="dev/runs",
+                        help="Directory for per-run logs (default: dev/runs)")
     parser.add_argument("--label", default=None,
                         help="Optional label appended to the run folder name")
     parser.add_argument("--no-log", action="store_true",

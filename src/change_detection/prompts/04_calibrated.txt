@@ -40,7 +40,7 @@ Field rules:
   - severity     : "low" (clears the bar but minor or ambiguous)
                    "medium" (clear and contained)
                    "high"   (active leak / large pool / near critical fixture)
-  - confidence   : float in [0.0, 1.0]. Calibrate as:
+  - confidence   : float in [0.0, 1.0]. Come up with one sentence explaining the main source of uncertainty. Calibrate as:
                      ~0.5  candidate is plausible but could be lighting/noise
                      ~0.75 clearly a real change but category uncertain
                      ~0.9+ unambiguous match to an example category or
@@ -57,6 +57,7 @@ Return ONLY a JSON object with this exact structure — no markdown, no explanat
       "anomaly_type": "short snake_case label, e.g. water_pooling",
       "severity": "low|medium|high",
       "confidence": 0.0,
+      "uncertainty": "one sentence on the main source of uncertainty",
       "bounding_box": {
         "x": <left edge in pixels>,
         "y": <top edge in pixels>,
