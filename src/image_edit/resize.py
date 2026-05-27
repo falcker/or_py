@@ -25,8 +25,8 @@ def resize_dir(input_dir: Path, output_dir: Path, max_width: int, max_height: in
 
 if __name__ == "__main__":
     print("Resizing images in a directory...")
-    input_dir = Path(r"C:\Falcker\cloud\falcker\AI\Operator Round TP6\Original")
-    output_dir = Path(r"C:\Falcker\cloud\falcker\AI\Operator Round TP6\Original_1000x750")
+    input_dir = Path(r"C:\Falcker\cloud\falcker\AI\Operator Round TP6\demo\change_detection_demo_2026-05-28\vlm\oil_detection\case_02")
+    output_dir = Path(r"C:\Falcker\cloud\falcker\AI\Operator Round TP6\demo\change_detection_demo_2026-05-28\vlm\oil_detection\case_02")
     print(f"Input directory: {input_dir}")
     print(f"Output directory: {output_dir}")
     resize_dir(input_dir, output_dir, max_width=1000, max_height=750)

@@ -54,6 +54,7 @@ from change_detection.claude_change_detect import (
     assemble_prompt,
     call_claude,
     annotate_image,
+    copy_inputs_to,
     create_run_folder,
     load_prompt,
 )
@@ -173,6 +174,8 @@ def run_one(
         {"path": p, "type": label, "bbox": None}
         for p, label in examples_pairs
     ]
+    # Share the inputs/ folder across sibling prompts under this target.
+    copy_inputs_to(target_dir, refs_str, examples_for_log, target_str)
     create_run_folder(
         runs_dir=str(target_dir),
         label=f"{scenario['name']}__{target.stem}__{prompt_path.stem}",
@@ -182,8 +185,9 @@ def run_one(
         prompt=final_prompt,
         anomalies=anomalies,
         usage=usage,
+        external_inputs_dir=target_dir / "inputs",
         annotated_image_path=str(annotated_path) if out_img else None,
-        copy_inputs=True,
+        copy_inputs=False,
         folder_name=prompt_path.stem,
     )
 

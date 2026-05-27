@@ -203,7 +203,7 @@ def call_claude(image_paths: list[str], api_key: str, prompt: str) -> dict:
     content = [build_image_block(p) for p in image_paths] + [{"type": "text", "text": prompt}]
 
     payload = {
-        "model": "claude-opus-4-5",
+        "model": "claude-opus-4-7",
         "max_tokens": 10000,
         "messages": [{"role": "user", "content": content}],
     }
@@ -341,6 +341,62 @@ def _safe_filename(name: str) -> str:
     return "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in name)
 
 
+def copy_inputs_to(
+    target_dir: str | Path,
+    ref_paths: list[str],
+    examples: list[dict],
+    current_path: str,
+) -> dict:
+    """Copy refs, examples, and the current image into <target_dir>/inputs/ using
+    canonical names. Returns a dict with the paths (relative to target_dir).
+
+    Idempotent: if a destination file already exists with the same size as the
+    source, the copy is skipped. Names match what create_run_folder would have
+    produced, so an externally-shared inputs/ folder is layout-compatible.
+    """
+    import shutil
+
+    target_dir = Path(target_dir)
+    inputs_dir = target_dir / "inputs"
+    inputs_dir.mkdir(parents=True, exist_ok=True)
+
+    def _copy(src: Path, dest: Path) -> None:
+        if dest.exists() and dest.stat().st_size == src.stat().st_size:
+            return
+        shutil.copy2(src, dest)
+
+    saved_refs: list[str] = []
+    saved_examples: list[dict] = []
+
+    for idx, p in enumerate(ref_paths, start=1):
+        src = Path(p)
+        dest = inputs_dir / f"ref_{idx:02d}{src.suffix}"
+        _copy(src, dest)
+        saved_refs.append(str(dest.relative_to(target_dir)))
+
+    for idx, ex in enumerate(examples, start=1):
+        src = Path(ex["path"])
+        dest_name = f"example_{idx:02d}_{_safe_filename(ex['type'])}{src.suffix}"
+        dest = inputs_dir / dest_name
+        _copy(src, dest)
+        saved_examples.append({
+            "path": str(dest.relative_to(target_dir)),
+            "type": ex["type"],
+            "bbox": ex["bbox"],
+        })
+
+    src_cur = Path(current_path)
+    dest_cur = inputs_dir / f"current{src_cur.suffix}"
+    _copy(src_cur, dest_cur)
+    saved_current = str(dest_cur.relative_to(target_dir))
+
+    return {
+        "refs": saved_refs,
+        "examples": saved_examples,
+        "current": saved_current,
+    }
+
+
 def create_run_folder(
     runs_dir: str,
     label: str | None,
@@ -353,6 +409,7 @@ def create_run_folder(
     annotated_image_path: str | None,
     copy_inputs: bool = True,
     folder_name: str | None = None,
+    external_inputs_dir: str | Path | None = None,
 ) -> str:
     """
     Create a timestamped run folder and save all artifacts.
@@ -387,37 +444,37 @@ def create_run_folder(
         json.dumps(anomalies, indent=2), encoding="utf-8"
     )
 
-    # 4. Copy input images and annotated output
+    # 4. Materialize input copies and the annotated output
     saved_refs: list[str] = []
     saved_examples: list[dict] = []
     saved_current: str | None = None
     saved_annotated: str | None = None
+    shared_inputs_dir_rel: str | None = None
 
-    if copy_inputs:
-        inputs_dir = run_dir / "inputs"
-        inputs_dir.mkdir(exist_ok=True)
+    if external_inputs_dir is not None:
+        # Inputs live in a folder shared across sibling runs. Don't copy them
+        # again — just record relative paths so consumers can find them.
+        ext_dir = Path(external_inputs_dir).resolve()
+        rel_to_run = os.path.relpath(ext_dir, start=run_dir.resolve())
+        shared_inputs_dir_rel = rel_to_run
 
         for idx, p in enumerate(ref_paths, start=1):
-            src = Path(p)
-            dest = inputs_dir / f"ref_{idx:02d}{src.suffix}"
-            shutil.copy2(src, dest)
-            saved_refs.append(str(dest.relative_to(run_dir)))
-
+            name = f"ref_{idx:02d}{Path(p).suffix}"
+            saved_refs.append(f"{rel_to_run}/{name}".replace("\\", "/"))
         for idx, ex in enumerate(examples, start=1):
-            src = Path(ex["path"])
-            dest_name = f"example_{idx:02d}_{_safe_filename(ex['type'])}{src.suffix}"
-            dest = inputs_dir / dest_name
-            shutil.copy2(src, dest)
+            name = f"example_{idx:02d}_{_safe_filename(ex['type'])}{Path(ex['path']).suffix}"
             saved_examples.append({
-                "path": str(dest.relative_to(run_dir)),
+                "path": f"{rel_to_run}/{name}".replace("\\", "/"),
                 "type": ex["type"],
                 "bbox": ex["bbox"],
             })
-
-        src_cur = Path(current_path)
-        dest_cur = inputs_dir / f"current{src_cur.suffix}"
-        shutil.copy2(src_cur, dest_cur)
-        saved_current = str(dest_cur.relative_to(run_dir))
+        name = f"current{Path(current_path).suffix}"
+        saved_current = f"{rel_to_run}/{name}".replace("\\", "/")
+    elif copy_inputs:
+        copied = copy_inputs_to(run_dir, ref_paths, examples, current_path)
+        saved_refs = copied["refs"]
+        saved_examples = copied["examples"]
+        saved_current = copied["current"]
 
     if annotated_image_path and Path(annotated_image_path).exists():
         src_ann = Path(annotated_image_path).resolve()
@@ -440,12 +497,13 @@ def create_run_folder(
                 for ex in examples
             ],
             "current": current_path,
-            "copies_in_run_folder": {
+            "copies": {
                 "refs": saved_refs,
                 "examples": saved_examples,
                 "current": saved_current,
                 "annotated": saved_annotated,
-            } if copy_inputs else None,
+            } if (copy_inputs or external_inputs_dir is not None) else None,
+            "shared_inputs_dir": shared_inputs_dir_rel,
         },
         "anomalies": anomalies,
         "usage": usage,
