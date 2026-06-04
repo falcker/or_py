@@ -156,6 +156,108 @@ def load_prompt(source: str) -> str:
     )
 
 
+def build_composite_image(
+    ref_paths: list[str],
+    target_path: str,
+    output_path: str,
+    *,
+    label_refs: str = "REFERENCE",
+    label_target: str = "TARGET (inspect this)",
+) -> tuple[str, tuple[int, int], tuple[int, int]]:
+    """Build a single composite image: refs stacked vertically on the LEFT,
+    target on the RIGHT, with colored label bands so the model can tell them
+    apart. Used when an upstream tool (e.g. Roboflow) only accepts a single
+    image per Claude API call.
+
+    Returns ``(output_path, target_offset_in_composite, target_dims)`` where
+    target_offset = (x, y) of the target panel's top-left corner in the
+    composite, and target_dims = (width, height) of the target panel.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    refs = [Image.open(p).convert("RGB") for p in ref_paths]
+    tgt  = Image.open(target_path).convert("RGB")
+
+    panel_h = tgt.height
+    tgt_w   = tgt.width
+
+    # Scale each ref to fit a vertical slot of height panel_h / n_refs
+    n_refs = max(1, len(refs))
+    slot_h = panel_h // n_refs if n_refs > 1 else panel_h
+    refs_scaled = []
+    for r in refs:
+        scale = slot_h / r.height
+        new_w = max(1, int(r.width * scale))
+        refs_scaled.append(r.resize((new_w, slot_h), Image.LANCZOS))
+    ref_panel_w = max((r.width for r in refs_scaled), default=tgt_w // 2)
+
+    # Label band — proportional but bounded
+    label_band_h = max(30, min(90, panel_h // 15))
+    font_size    = max(16, label_band_h - 14)
+    try:
+        font = ImageFont.truetype("arial.ttf", font_size)
+    except Exception:
+        try:
+            font = ImageFont.truetype("DejaVuSans-Bold.ttf", font_size)
+        except Exception:
+            font = ImageFont.load_default()
+
+    composite_w = ref_panel_w + tgt_w
+    composite_h = panel_h + label_band_h
+
+    img = Image.new("RGB", (composite_w, composite_h), (40, 40, 40))
+    draw = ImageDraw.Draw(img)
+
+    # Label bands (ref = grey, target = red so it's unmistakable)
+    draw.rectangle([0, 0, ref_panel_w, label_band_h], fill=(70, 70, 78))
+    draw.rectangle([ref_panel_w, 0, composite_w, label_band_h], fill=(190, 50, 50))
+    pad = max(8, label_band_h // 6)
+    text_y = (label_band_h - font_size) // 2
+    draw.text((pad, text_y), label_refs, fill=(255, 255, 255), font=font)
+    draw.text((ref_panel_w + pad, text_y), label_target, fill=(255, 255, 255), font=font)
+
+    # Paste refs (centered within their slot)
+    y = label_band_h
+    for r in refs_scaled:
+        x = (ref_panel_w - r.width) // 2
+        img.paste(r, (x, y))
+        y += r.height
+    # Paste target
+    img.paste(tgt, (ref_panel_w, label_band_h))
+
+    # Thin divider line between ref panel and target panel
+    draw.line([(ref_panel_w, 0), (ref_panel_w, composite_h)], fill=(20, 20, 20), width=2)
+
+    img.save(output_path, quality=92)
+    target_offset = (ref_panel_w, label_band_h)
+    target_dims   = (tgt_w, panel_h)
+    return output_path, target_offset, target_dims
+
+
+def build_layout_block_composite(
+    n_refs: int, target_w: int, target_h: int, n_examples: int = 0
+) -> str:
+    """Layout preamble for composite-image mode (single image to the model)."""
+    refs_word = "REFERENCE panel" if n_refs == 1 else f"{n_refs} REFERENCE panels"
+    ex_note = ""
+    if n_examples:
+        ex_note = (f"\n  - {n_examples} EXAMPLE panel(s) calibrate anomaly categories; "
+                   f"do NOT report changes found inside an example panel.")
+    return (
+        "Image input:\n"
+        "  ONE composite image. Layout: " + refs_word + " on the LEFT (grey label band), "
+        "the TARGET panel on the RIGHT (red label band labeled 'TARGET (inspect this)').\n"
+        "  - The REFERENCE panel(s) show the baseline/normal state. Anything visible "
+        "there is NOT an anomaly, even if it looks like wetness or staining."
+        + ex_note + "\n"
+        "  - Inspect the TARGET panel ONLY. Never report a region inside a reference panel.\n"
+        f"  - The TARGET panel is {target_w} px wide × {target_h} px tall.\n"
+        "  - Bounding box coordinates MUST be expressed in the TARGET panel's own "
+        "coordinate space (origin (0,0) is the top-left corner of the TARGET panel — "
+        "NOT the composite image). Do not include the reference panel in your coordinates."
+    )
+
+
 def build_layout_block(refs: list[str], examples: list[tuple[str, str]], target: str) -> str:
     """Generate the 'Image inputs' description that precedes the user prompt.
 
@@ -176,7 +278,19 @@ def build_layout_block(refs: list[str], examples: list[tuple[str, str]], target:
         )
         idx += 1
 
-    lines.append(f"  {idx}. TARGET — the image to inspect. Report changes in this image only.")
+    target_line = f"  {idx}. TARGET — the image to inspect. Report changes in this image only."
+    try:
+        from PIL import Image as _PILImage
+        with _PILImage.open(target) as _img:
+            tw, th = _img.size
+        target_line += (
+            f" Dimensions: {tw}×{th} px. "
+            f"All bounding-box coordinates must be integers within "
+            f"x ∈ [0, {tw - 1}], y ∈ [0, {th - 1}]."
+        )
+    except Exception:
+        pass
+    lines.append(target_line)
 
     if examples:
         labels = sorted({label for _, label in examples})
@@ -186,8 +300,27 @@ def build_layout_block(refs: list[str], examples: list[tuple[str, str]], target:
     return "\n".join(lines)
 
 
-def assemble_prompt(base_prompt: str, refs: list[str], examples: list[tuple[str, str]], target: str) -> str:
-    layout = build_layout_block(refs, examples, target)
+def assemble_prompt(
+    base_prompt: str,
+    refs: list[str],
+    examples: list[tuple[str, str]],
+    target: str,
+    *,
+    composite_dims: tuple[int, int] | None = None,
+) -> str:
+    """Prepend the layout description to the user prompt.
+
+    If ``composite_dims`` is provided, use the single-image composite preamble
+    (and ignore positional layout for refs/target). Otherwise use the standard
+    multi-image preamble.
+    """
+    if composite_dims is not None:
+        layout = build_layout_block_composite(
+            n_refs=len(refs), target_w=composite_dims[0], target_h=composite_dims[1],
+            n_examples=len(examples),
+        )
+    else:
+        layout = build_layout_block(refs, examples, target)
     return f"{layout}\n\n{base_prompt.strip()}\n"
 
 
@@ -197,8 +330,8 @@ def assemble_prompt(base_prompt: str, refs: list[str], examples: list[tuple[str,
 
 def call_claude(image_paths: list[str], api_key: str, prompt: str) -> dict:
     """Send images to Claude and return the parsed JSON result."""
-    if len(image_paths) < 2:
-        raise ValueError("At least two images are required (one reference/example + one target).")
+    if len(image_paths) < 1:
+        raise ValueError("At least one image is required.")
 
     content = [build_image_block(p) for p in image_paths] + [{"type": "text", "text": prompt}]
 
@@ -257,8 +390,14 @@ def call_claude(image_paths: list[str], api_key: str, prompt: str) -> dict:
 #  Image annotation (Pillow)
 # ─────────────────────────────────────────────
 
-def annotate_image(img_path: str, anomalies: list[dict], output_path: str) -> str:
-    """Draw a bounding box per anomaly on the target image and save to output_path."""
+def annotate_image(img_path: str, anomalies: list[dict], output_path: str,
+                   bbox_offset: tuple[int, int] = (0, 0)) -> str:
+    """Draw a bounding box per anomaly on the target image and save to output_path.
+
+    ``bbox_offset`` is added to every (x, y) before drawing — used in composite
+    mode where the model reports bboxes in TARGET-panel coordinates but we
+    annotate the composite (so the offset is the target panel's top-left).
+    """
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
@@ -284,16 +423,30 @@ def annotate_image(img_path: str, anomalies: list[dict], output_path: str) -> st
             font = ImageFont.load_default()
 
     drawn_any = False
+    off_x, off_y = bbox_offset
     for idx, anomaly in enumerate(anomalies):
         bb = anomaly.get("bounding_box", {})
-        x = bb.get("x", 0)
-        y = bb.get("y", 0)
+        x = bb.get("x", 0) + off_x
+        y = bb.get("y", 0) + off_y
         w = bb.get("width", 0)
         h = bb.get("height", 0)
 
         if x == 0 and y == 0 and w == 0 and h == 0:
             print(f"⚠  Anomaly {idx + 1} has no bounding box — skipping.")
             continue
+
+        if x >= img.width or y >= img.height or x + w <= 0 or y + h <= 0:
+            print(f"⚠  Anomaly {idx + 1} bounding box ({x},{y},{w},{h}) is entirely outside "
+                  f"image bounds ({img.width}×{img.height}) — skipping.")
+            continue
+
+        # Clamp to image bounds
+        x2 = min(x + w, img.width)
+        y2 = min(y + h, img.height)
+        x = max(0, x)
+        y = max(0, y)
+        w = x2 - x
+        h = y2 - y
 
         color = ANOMALY_COLORS[idx % len(ANOMALY_COLORS)]
         color_fill = (*color, 40)
@@ -577,13 +730,26 @@ def resolve_inputs(args) -> tuple[list[str], list[tuple[str, str]], str, list[st
 
 def run_cli(args):
     key = args.api_key or os.environ.get("ANTHROPIC_API_KEY", "")
-    if not key:
+    if not key and not args.dry_run:
         sys.exit("Error: provide --api-key or set ANTHROPIC_API_KEY.")
 
     refs, examples, target, all_paths = resolve_inputs(args)
 
     base_prompt = load_prompt(args.prompt)
-    final_prompt = assemble_prompt(base_prompt, refs, examples, target)
+
+    composite_path: str | None = None
+    target_offset: tuple[int, int] = (0, 0)
+    if args.merge_input:
+        if examples:
+            print("⚠  --merge-input ignores --example panels; only refs + target are composed.")
+        composite_path = str(Path(args.output).with_name(Path(args.output).stem + "_composite.jpg"))
+        _, target_offset, target_dims = build_composite_image(refs, target, composite_path)
+        final_prompt = assemble_prompt(base_prompt, refs, examples, target,
+                                       composite_dims=target_dims)
+        api_images = [composite_path]
+    else:
+        final_prompt = assemble_prompt(base_prompt, refs, examples, target)
+        api_images = all_paths
 
     if args.show_prompt:
         print("── Final prompt ────────────────────────")
@@ -591,14 +757,20 @@ def run_cli(args):
         print("────────────────────────────────────────\n")
 
     if args.dry_run:
-        print(f"Dry run — would send {len(all_paths)} image(s):")
-        for i, p in enumerate(all_paths, 1):
-            print(f"  {i}. {p}")
+        if args.merge_input:
+            print(f"Dry run — would send 1 composite image ({composite_path}):")
+            print(f"  built from {len(refs)} ref(s) + 1 target")
+        else:
+            print(f"Dry run — would send {len(all_paths)} image(s):")
+            for i, p in enumerate(all_paths, 1):
+                print(f"  {i}. {p}")
         return
 
-    print(f"🔍  Sending {len(all_paths)} image(s) to Claude "
-          f"({len(refs)} ref, {len(examples)} example, 1 target)...")
-    result, usage = call_claude(all_paths, key, final_prompt)
+    mode_desc = (f"1 composite image (merged from {len(refs)} ref + 1 target)"
+                 if args.merge_input
+                 else f"{len(all_paths)} image(s) ({len(refs)} ref, {len(examples)} example, 1 target)")
+    print(f"🔍  Sending {mode_desc} to Claude...")
+    result, usage = call_claude(api_images, key, final_prompt)
     anomalies = result.get("anomalies", [])
 
     print("\n── Result ──────────────────────────────")
@@ -626,7 +798,13 @@ def run_cli(args):
         json.dump({"anomalies": anomalies, "usage": usage}, f, indent=2)
     print(f"\n✅  JSON saved  : {json_path}")
 
-    out_img = annotate_image(target, anomalies, args.output)
+    # In merge-input mode, annotate the composite (with target-panel-coord
+    # offset). Otherwise annotate the original target image.
+    if args.merge_input and composite_path:
+        out_img = annotate_image(composite_path, anomalies, args.output,
+                                 bbox_offset=target_offset)
+    else:
+        out_img = annotate_image(target, anomalies, args.output)
     if out_img:
         print(f"🖼   Image saved : {out_img}")
 
@@ -671,6 +849,12 @@ def main():
                         help="Print the fully assembled prompt before sending.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Resolve inputs and prompt, but do not call the API.")
+    parser.add_argument("--merge-input", action="store_true",
+                        help="Compose refs + target into a single labeled image and "
+                             "send only that to the API. Useful when an upstream tool "
+                             "(e.g. Roboflow) restricts uploads to one image. The "
+                             "composite is saved alongside --output; bbox coordinates "
+                             "are reported in TARGET-panel space.")
     parser.add_argument("--api-key", "-k", help="Anthropic API key (or set ANTHROPIC_API_KEY)")
     parser.add_argument("--output", "-o", default="annotated_diff.jpg",
                         help="Output annotated image path (default: annotated_diff.jpg)")

@@ -238,8 +238,10 @@ def main() -> None:
     parser.add_argument("--prompts-dir",
                         default="src/change_detection/prompts",
                         help="Directory of prompt .txt files.")
-    parser.add_argument("--prompts", default=None,
-                        help="Comma-separated prompt stems to run (default: all).")
+    parser.add_argument("--prompts", default="03,04,05",
+                        help="Comma-separated prompt stems to run. "
+                             "Default: 03,04,05 → 03_focused, 04_calibrated, 05_rigorous. "
+                             "Pass 'all' to run every prompt in --prompts-dir.")
     parser.add_argument("--scenarios", default=None,
                         help="Comma-separated scenario folder names to run (default: all).")
     parser.add_argument("--out", default="dev/sweeps",
@@ -271,10 +273,16 @@ def main() -> None:
         keep = {s.strip() for s in args.scenarios.split(",") if s.strip()}
         scenarios = [s for s in scenarios if s["name"] in keep]
 
-    prompts = list_prompts(prompts_dir)
-    if args.prompts:
-        keep = {s.strip() for s in args.prompts.split(",") if s.strip()}
-        prompts = [p for p in prompts if p.stem in keep]
+    if args.prompts and args.prompts.strip().lower() != "all":
+        wanted = [s.strip() for s in args.prompts.split(",") if s.strip()]
+        prompts: list[Path] = []
+        for stem in wanted:
+            cands = sorted(prompts_dir.glob(f"{stem}*.txt"))
+            if not cands:
+                sys.exit(f"Prompt '{stem}' not found in {prompts_dir}.")
+            prompts.append(cands[0])
+    else:
+        prompts = list_prompts(prompts_dir)
 
     if not scenarios:
         sys.exit("No scenarios to run (after filtering).")

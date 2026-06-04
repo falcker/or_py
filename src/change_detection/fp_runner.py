@@ -179,8 +179,9 @@ def main() -> None:
                     help="Output root for per-run artifacts and the summary JSON.")
     ap.add_argument("--prompts-dir", default="src/change_detection/prompts",
                     help="Directory of prompt .txt files.")
-    ap.add_argument("--prompts", default="00_unconditional,02_basic,05_rigorous",
-                    help="Comma-separated prompt stems (prefix match allowed).")
+    ap.add_argument("--prompts", default="03,04,05",
+                    help="Comma-separated prompt stems (prefix match allowed). "
+                         "Default: 03,04,05 → 03_focused, 04_calibrated, 05_rigorous.")
     ap.add_argument("--n-assets", type=int, default=30,
                     help="How many assets (subdirs) to sample. Use 0 for all.")
     ap.add_argument("--seed", type=int, default=42,
